@@ -85,6 +85,10 @@
   .cmdline .copybtn:hover{color:var(--accent);border-color:var(--accent)}
   pre.out_body{background:#080a0f;border:1px solid var(--line);border-radius:9px;padding:11px;overflow:auto;margin:0;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;max-height:calc(100vh - 300px)}
   .rendered-box{background:#080a0f;border:1px solid var(--line);border-radius:9px;padding:11px;overflow:auto;max-height:calc(100vh - 300px)}
+  /* ── Hover tooltips (data-tip) for skill component cards ── */
+  .ttip{position:relative;cursor:help}
+  .ttip::after{content:attr(data-tip);display:none;position:absolute;z-index:100;left:50%;top:calc(100% + 6px);transform:translateX(-50%);background:#0a0e1a;border:1px solid #2b436d;border-radius:8px;padding:8px 12px;box-shadow:0 8px 24px -8px rgba(0,0,0,.6);font-size:11.5px;line-height:1.5;color:#e6edf8;min-width:220px;max-width:320px;white-space:normal;text-align:left;pointer-events:none;font-weight:500;letter-spacing:.2px}
+  .ttip:hover::after{display:block}
   .fmt-tabs{display:flex;gap:4px;margin-bottom:8px}
   .fmt-tab{background:var(--panel);border:1px solid var(--line);border-radius:7px 7px 0 0;padding:5px 14px;font-size:11.5px;font-weight:600;cursor:pointer;color:var(--mute);border-bottom:none;transition:.12s}
   .fmt-tab:hover{color:var(--text)}
