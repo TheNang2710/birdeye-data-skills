@@ -26,27 +26,35 @@
   .keybtn:hover{color:var(--accent);border-color:var(--accent)}
   .keysave{background:linear-gradient(180deg,#3b7be8,#2c60c4);border:none;border-radius:6px;color:#fff;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600}
   .keysave:disabled{opacity:.5;cursor:not-allowed}
-  .layout{display:grid;grid-template-columns:230px 1fr 210px;min-height:calc(100vh - 88px)}
-  @media (max-width:900px){.layout{grid-template-columns:1fr}}
+  .layout{display:grid;grid-template-columns:290px 1fr 270px;min-height:calc(100vh - 130px)}
+  @media (max-width:850px){.layout{grid-template-columns:1fr}}
+  /* ── Top group filter bar ── */
+  .grpbar{display:flex;gap:8px;padding:8px 16px;background:#0d1017;border-bottom:1px solid var(--line);align-items:center}
+  body.light .grpbar{background:#eef1f7}
+  .grpbar .lbl{font-size:11px;color:var(--mute);font-weight:700;letter-spacing:.5px;text-transform:uppercase;margin-right:4px}
+  .grp{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 16px;font-size:12px;font-weight:600;color:var(--mute);cursor:pointer;transition:.12s;white-space:nowrap;display:inline-flex;align-items:center;gap:5px}
+  .grp:hover{color:var(--text);border-color:var(--accent);transform:translateY(-1px)}
+  .grp.active{background:var(--accent);color:#fff;border-color:var(--accent);box-shadow:0 2px 8px rgba(91,157,255,.35)}
+  .grp .cnt{font-size:10px;opacity:.75;background:rgba(255,255,255,.15);padding:1px 6px;border-radius:999px}
   /* ── Skill list ── */
-  nav{padding:10px;border-right:1px solid var(--line);overflow:auto;max-height:calc(100vh - 88px);background:#0d1017}
-  .sc{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:5px;cursor:pointer;transition:.15s;display:flex;gap:8px;align-items:flex-start}
-  .sc:hover{border-color:var(--accent);background:var(--panel2)}
-  .sc.active{border-color:var(--accent);background:linear-gradient(180deg,#16203a,#141821);box-shadow:0 0 0 1px rgba(91,157,255,.4)}
-  .sc .ic{font-size:15px;line-height:1.3;flex-shrink:0}
+  nav{padding:12px;border-right:1px solid var(--line);overflow:auto;max-height:calc(100vh - 130px);background:#0d1017}
+  .sc{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;margin-bottom:8px;cursor:pointer;transition:.15s;display:flex;gap:10px;align-items:flex-start}
+  .sc:hover{border-color:var(--accent);background:var(--panel2);transform:translateX(2px)}
+  .sc.active{border-color:var(--accent);background:linear-gradient(180deg,#16203a,#141821);box-shadow:0 0 0 1px rgba(91,157,255,.4),0 2px 10px rgba(91,157,255,.15)}
+  .sc .ic{font-size:20px;line-height:1.3;flex-shrink:0}
   .sc .body{flex:1;min-width:0}
-  .sc .nm{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .sc .ds{font-size:10px;color:var(--mute);margin-top:2px;line-height:1.35}
-  .sc .cu{font-size:9px;color:var(--warn);margin-top:3px;font-weight:600}
+  .sc .nm{font-weight:700;font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sc .ds{font-size:11.5px;color:var(--mute);margin-top:3px;line-height:1.4}
+  .sc .cu{font-size:10px;color:var(--warn);margin-top:5px;font-weight:700;letter-spacing:.3px}
   /* ── History sidebar ── */
-  aside.history{padding:10px;border-left:1px solid var(--line);overflow:auto;max-height:calc(100vh - 88px);background:#0d1017}
-  aside.history h3{font-size:11px;margin:0 0 8px;color:var(--mute);font-weight:700;letter-spacing:.5px;text-transform:uppercase;display:flex;align-items:center;justify-content:space-between}
-  aside.history h3 button{background:none;border:none;color:var(--accent);font-size:10px;cursor:pointer;font-weight:600}
-  .h-item{background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:6px 8px;margin-bottom:4px;cursor:pointer;transition:.12s}
-  .h-item:hover{border-color:var(--accent);background:var(--panel2)}
-  .h-item .hk{font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .h-item .hd{font-size:9.5px;color:var(--mute);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .h-empty{font-size:11px;color:var(--mute);padding:10px 4px;text-align:center}
+  aside.history{padding:12px;border-left:1px solid var(--line);overflow:auto;max-height:calc(100vh - 130px);background:#0d1017}
+  aside.history h3{font-size:12px;margin:0 0 10px;color:var(--mute);font-weight:700;letter-spacing:.6px;text-transform:uppercase;display:flex;align-items:center;justify-content:space-between}
+  aside.history h3 button{background:none;border:none;color:var(--accent);font-size:14px;cursor:pointer;font-weight:600}
+  .h-item{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;cursor:pointer;transition:.12s}
+  .h-item:hover{border-color:var(--accent);background:var(--panel2);transform:translateX(-2px)}
+  .h-item .hk{font-size:12.5px;font-weight:700;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .h-item .hd{font-size:11px;color:var(--mute);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .h-empty{font-size:12px;color:var(--mute);padding:14px 4px;text-align:center}
   /* ── Output area ── */
   section.out{padding:12px 16px 18px;overflow:auto}
   .form{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
@@ -101,14 +109,9 @@
   body.light .form .hd .cmdbadge{background:#eef1f7}
   body.light input[type=text],body.light select{background:#eef1f7}
   body.light .keywrap input{background:#eef1f7}
-  /* ── Group filter chips ── */
-  .grpbar{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
-  .grp{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 9px;font-size:10px;font-weight:600;color:var(--mute);cursor:pointer;transition:.12s;white-space:nowrap}
-  .grp:hover{color:var(--text);border-color:var(--accent)}
-  .grp.active{background:var(--accent);color:#fff;border-color:var(--accent)}
   /* ── Group badge on skill card ── */
   .sc{position:relative}
-  .sc .gbad{position:absolute;top:5px;right:6px;font-size:9px;padding:1px 5px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);color:var(--mute);font-weight:700;letter-spacing:.3px;line-height:1.3}
+  .sc .gbad{position:absolute;top:8px;right:8px;font-size:9.5px;padding:2px 7px;border-radius:6px;background:var(--panel2);border:1px solid var(--line);color:var(--mute);font-weight:700;letter-spacing:.3px;line-height:1.4}
   .sc .body{padding-right:38px}
   .sc[data-grp="token"] .gbad{background:rgba(91,157,255,.12);color:#7ab0ff;border-color:rgba(91,157,255,.3)}
   .sc[data-grp="wallet"] .gbad{background:rgba(124,91,255,.12);color:#a58bff;border-color:rgba(124,91,255,.3)}
@@ -131,6 +134,8 @@
   <button class="keysave" id="saveKey">Set</button>
   <span class="pill" id="keyStatus">not set</span>
 </div>
+
+<div class="grpbar" id="grpBar"></div>
 
 <div class="layout">
   <nav id="skillList"></nav>
@@ -364,14 +369,17 @@ async function switchFormat(fmt){
 
 /* ── Skill list ── */
 function renderSkillList(){
-  const el = document.getElementById('skillList');
-  // group filter chips
-  let chips = '<div class="grpbar">';
+  // group filter bar at top
+  const grpEl = document.getElementById('grpBar');
+  let chips = '<span class="lbl">Group:</span>';
   Object.keys(GROUPS).forEach(g=>{
     const count = g==='all' ? SKILLS.length : SKILLS.filter(s=>s.group===g).length;
-    chips += `<button class="grp ${currentGroup===g?'active':''}" data-grp="${g}">${GROUPS[g].icon} ${GROUPS[g].label} <span style="opacity:.6">${count}</span></button>`;
+    chips += `<button class="grp ${currentGroup===g?'active':''}" data-grp="${g}">${GROUPS[g].icon} ${GROUPS[g].label}<span class="cnt">${count}</span></button>`;
   });
-  chips += '</div>';
+  grpEl.innerHTML = chips;
+  grpEl.querySelectorAll('.grp').forEach(c=>c.onclick=()=>{currentGroup=c.dataset.grp;renderSkillList();});
+
+  const el = document.getElementById('skillList');
   const list = SKILLS.filter(s=>currentGroup==='all'||s.group===currentGroup);
   const cards = list.map(s=>{
     const g = GROUPS[s.group]||{badge:'?'};
@@ -385,8 +393,7 @@ function renderSkillList(){
       </div>
     </div>`;
   }).join('');
-  el.innerHTML = chips + (cards || '<div class="h-empty">no skills in this group</div>');
-  el.querySelectorAll('.grp').forEach(c=>c.onclick=()=>{currentGroup=c.dataset.grp;renderSkillList();});
+  el.innerHTML = cards || '<div class="h-empty">no skills in this group</div>';
   el.querySelectorAll('.sc').forEach(c=>c.onclick=()=>{currentSkill=SKILLS.find(x=>x.id===c.dataset.id);renderSkillList();renderForm();});
 }
 
@@ -433,7 +440,10 @@ function getInputVals(){
 
 function buildArgv(formatOverride){
   const s = currentSkill;
-  const argv = [s.cmd];
+  // wallet-score: force fresh run (bypass 24h CSV cache) so 5 copy-tradeability
+  // components are computed. Wallet age (first-funded) cache is permanent and
+  // still used — saves 40 CU. --nocache must go BEFORE the subcommand.
+  const argv = s.cmd === 'wallet-score' ? ['--nocache', s.cmd] : [s.cmd];
   const vals = getInputVals();
   s.inputs.forEach(i=>{
     let v = vals[i.k];
