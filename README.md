@@ -39,19 +39,19 @@ birdeye-data-skills/
 
 ---
 
-## 🚀 Cách chạy local (How to run locally)
+## 🚀 How to Run Locally
 
-### Yêu cầu (Prerequisites)
+### Prerequisites
 
-- **Python 3.8+** — kiểm tra: `python3 --version`
-- **pip** — cài kèm Python
-- **Mạng internet** (để gọi Birdeye API)
-- **Birdeye API key** — đăng ký miễn phí tại
+- **Python 3.8+** — check with: `python3 --version`
+- **pip** — comes bundled with Python
+- **Internet access** (to call the Birdeye API)
+- **Birdeye API key** — sign up for free at
   [birdeye.so/user/api](https://birdeye.so/user/api)
 
 ---
 
-### Bước 1: Clone repo
+### Step 1: Clone the repo
 
 ```bash
 git clone https://github.com/TheNang2710/birdeye-data-skills.git
@@ -60,46 +60,47 @@ cd birdeye-data-skills
 
 ---
 
-### Bước 2: Cài dependencies
+### Step 2: Install dependencies
 
 ```bash
 pip install -r birdeye-screener/requirements.txt
 ```
 
-> Chỉ có 1 dependency là `requests`. Không cần cài Node.js hay framework nào khác.
+> Only one dependency: `requests`. No Node.js or any other framework required.
 
 ---
 
-### Bước 3: Cấu hình API key
+### Step 3: Configure the API key
 
-Có **3 cách** — chọn 1:
+There are **3 ways** — pick one:
 
-**Cách A — Dùng UI (khuyến nghị):** Bỏ qua bước này, đi thẳng Bước 4, sau đó paste
-key vào ô "API Key" trên giao diện và bấm **Set**. Key được lưu trong browser
-`localStorage` + bộ nhớ server (không persist trừ khi bạn chọn persist).
+**Option A — Via the UI (recommended):** Skip this step, go straight to Step 4,
+then paste the key into the "API Key" field on the interface and click **Set**.
+The key is stored in browser `localStorage` + server memory (not persisted unless
+you choose persist).
 
-**Cách B — Biến môi trường:**
+**Option B — Environment variable:**
 ```bash
 export BIRDEYE_API_KEY=your_api_key_here
 ```
 
-**Cách C — File `.env`:**
+**Option C — `.env` file:**
 ```bash
 cp birdeye-screener/.env.example birdeye-screener/.env
-# mở birdeye-screener/.env và thay your_api_key_here bằng key thật của bạn
+# open birdeye-screener/.env and replace your_api_key_here with your real key
 ```
 
-> ⚠️ Không bao giờ commit file `.env` — nó đã có trong `.gitignore`.
+> ⚠️ Never commit the `.env` file — it is already in `.gitignore`.
 
 ---
 
-### Bước 4: Khởi động server
+### Step 4: Start the server
 
 ```bash
 python3 deploy/server.py --port 8899
 ```
 
-Bạn sẽ thấy log:
+You will see a log like:
 ```
 [deploy] Birdeye Test Console → http://127.0.0.1:8899
 [deploy] CLI: /path/to/birdeye-screener/scripts/birdeye_cli.py
@@ -107,29 +108,29 @@ Bạn sẽ thấy log:
 
 ---
 
-### Bước 5: Mở trình duyệt
+### Step 5: Open the browser
 
 ```
 http://localhost:8899
 ```
 
-Sử dụng:
-1. Chọn skill ở cột trái (hoặc filter theo nhóm ở thanh trên)
-2. Điền tham số ở form giữa
-3. Bấm **▶ Run**
-4. Xem kết quả ở 4 tab: 🖥 UI · 📄 Plain · ✈️ Telegram · { } JSON
-5. Click vào mục ở cột **History** phải để xem lại (0 CU, từ cache local)
+Usage:
+1. Pick a skill from the left column (or filter by group in the top bar)
+2. Fill in the parameters in the middle form
+3. Click **▶ Run**
+4. View results in 4 tabs: 🖥 UI · 📄 Plain · ✈️ Telegram · { } JSON
+5. Click any entry in the **History** column on the right to replay (0 CU, from local cache)
 
 ---
 
-### Chạy CLI trực tiếp (không qua web UI)
+### Running the CLI directly (without the web UI)
 
-Bạn cũng có thể chạy trực tiếp từng skill bằng CLI:
+You can also run each skill directly via the CLI:
 
 ```bash
 cd birdeye-screener
 
-# Danh sách trending tokens
+# List trending tokens
 python3 scripts/birdeye_cli.py trending-list --chain sol --interval 1h --limit 20 --format telegram
 
 # Token due diligence
@@ -139,7 +140,7 @@ python3 scripts/birdeye_cli.py token-dd --chain sol --address <TOKEN_ADDRESS> --
 python3 scripts/birdeye_cli.py wallet-score --chain sol --wallet <WALLET_ADDRESS> --duration 30d --format rendered
 ```
 
-Xem tất cả lệnh:
+See all commands:
 ```bash
 python3 scripts/birdeye_cli.py --help
 ```
