@@ -49,7 +49,7 @@ pip install -r birdeye-screener/requirements.txt
 
 ### 2. Set your Birdeye API key
 
-Get a free key at [birdeye.so/user/api](https://birdeye.so/user/api).
+Get a free key at [[birdeye.so/user/api](https://birdeye.so/user/api)](https://data.birdeye.so/docs/authentication).
 
 **Option A — UI (recommended):** Start the server, then paste your key in the
 API key bar at the top and click **Set**. The key is stored in browser
