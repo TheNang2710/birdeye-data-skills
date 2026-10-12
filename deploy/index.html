@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Birdeye Skills — Test Console</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#141821; --panel2:#1a1f2b; --line:#262c3a;
+    --text:#e6e9f2; --mute:#8b95ad; --accent:#5b9dff; --accent2:#7c5bff;
+    --good:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 ui-sans-serif,-apple-system,"Segoe UI",Inter,system-ui,sans-serif}
+  header{padding:9px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;background:linear-gradient(180deg,#0f1320,#0b0d12);flex-wrap:wrap}
+  header h1{font-size:13px;margin:0;font-weight:700;letter-spacing:.2px}
+  header .pill{font-size:11px;color:var(--mute)}
+  header .status{margin-left:auto;font-size:11px;color:var(--accent)}
+  /* ── API key bar ── */
+  .keybar{display:flex;align-items:center;gap:6px;padding:8px 16px;background:#0d1017;border-bottom:1px solid var(--line)}
+  .keybar label{font-size:11px;color:var(--mute);font-weight:600}
+  .keywrap{position:relative;display:flex;align-items:center;flex:1;max-width:520px}
+  .keywrap input{width:100%;background:#080a0f;border:1px solid var(--line);border-radius:6px;padding:5px 8px;padding-right:64px;color:var(--text);font-family:ui-monospace,monospace;font-size:12px;outline:none}
+  .keywrap input:focus{border-color:var(--accent)}
+  .keybtn{position:absolute;right:4px;background:var(--panel2);border:1px solid var(--line);border-radius:5px;color:var(--mute);font-size:10px;padding:3px 7px;cursor:pointer;font-weight:600}
+  .keybtn:hover{color:var(--accent);border-color:var(--accent)}
+  .keysave{background:linear-gradient(180deg,#3b7be8,#2c60c4);border:none;border-radius:6px;color:#fff;font-size:11px;padding:5px 12px;cursor:pointer;font-weight:600}
+  .keysave:disabled{opacity:.5;cursor:not-allowed}
+  .layout{display:grid;grid-template-columns:230px 1fr 210px;min-height:calc(100vh - 88px)}
+  @media (max-width:900px){.layout{grid-template-columns:1fr}}
+  /* ── Skill list ── */
+  nav{padding:10px;border-right:1px solid var(--line);overflow:auto;max-height:calc(100vh - 88px);background:#0d1017}
+  .sc{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:5px;cursor:pointer;transition:.15s;display:flex;gap:8px;align-items:flex-start}
+  .sc:hover{border-color:var(--accent);background:var(--panel2)}
+  .sc.active{border-color:var(--accent);background:linear-gradient(180deg,#16203a,#141821);box-shadow:0 0 0 1px rgba(91,157,255,.4)}
+  .sc .ic{font-size:15px;line-height:1.3;flex-shrink:0}
+  .sc .body{flex:1;min-width:0}
+  .sc .nm{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sc .ds{font-size:10px;color:var(--mute);margin-top:2px;line-height:1.35}
+  .sc .cu{font-size:9px;color:var(--warn);margin-top:3px;font-weight:600}
+  /* ── History sidebar ── */
+  aside.history{padding:10px;border-left:1px solid var(--line);overflow:auto;max-height:calc(100vh - 88px);background:#0d1017}
+  aside.history h3{font-size:11px;margin:0 0 8px;color:var(--mute);font-weight:700;letter-spacing:.5px;text-transform:uppercase;display:flex;align-items:center;justify-content:space-between}
+  aside.history h3 button{background:none;border:none;color:var(--accent);font-size:10px;cursor:pointer;font-weight:600}
+  .h-item{background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:6px 8px;margin-bottom:4px;cursor:pointer;transition:.12s}
+  .h-item:hover{border-color:var(--accent);background:var(--panel2)}
+  .h-item .hk{font-size:11px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .h-item .hd{font-size:9.5px;color:var(--mute);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .h-empty{font-size:11px;color:var(--mute);padding:10px 4px;text-align:center}
+  /* ── Output area ── */
+  section.out{padding:12px 16px 18px;overflow:auto}
+  .form{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:10px}
+  .form .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px}
+  .form .hd .ttl{font-weight:600;font-size:13px}
+  .form .hd .cmdbadge{font-family:ui-monospace,monospace;font-size:10.5px;color:var(--mute);background:#0d1017;padding:2px 7px;border-radius:5px;border:1px solid var(--line);cursor:pointer;display:inline-flex;align-items:center;gap:4px}
+  .form .hd .cmdbadge:hover{color:var(--accent);border-color:var(--accent)}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:8px}
+  .field{display:flex;flex-direction:column;gap:3px}
+  .field label{color:var(--mute);font-size:10.5px;font-weight:600}
+  .field.half{grid-column:span 1}
+  .field.full{grid-column:1/-1}
+  input,select,button{font:inherit;color:inherit}
+  input[type=text],select{width:100%;background:#0d1017;border:1px solid var(--line);border-radius:6px;padding:5px 8px;outline:none;font-size:12px}
+  input[type=text]:focus,select:focus{border-color:var(--accent)}
+  input[type=checkbox]{accent-color:var(--accent)}
+  .checks{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--mute)}
+  .checks label{display:inline-flex;align-items:center;gap:4px;cursor:pointer}
+  .rowrun{display:flex;gap:8px;align-items:center;margin-top:8px}
+  .run{background:linear-gradient(180deg,#3b7be8,#2c60c4);border:none;border-radius:7px;padding:7px 18px;font-weight:600;cursor:pointer;font-size:12.5px;white-space:nowrap;box-shadow:0 1px 0 rgba(255,255,255,.1) inset}
+  .run:disabled{opacity:.55;cursor:not-allowed}
+  .runhint{font-size:10.5px;color:var(--mute)}
+  .meta{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;font-size:11px;color:var(--mute)}
+  .meta .chip{background:var(--panel);border:1px solid var(--line);padding:2px 8px;border-radius:999px}
+  .cu-chip{color:var(--warn);font-weight:600}
+  .cmdline{background:#080a0f;border:1px solid var(--line);border-radius:7px;padding:7px 10px;margin-bottom:8px;font-family:ui-monospace,monospace;font-size:11px;color:#cdd3df;word-break:break-all;display:flex;align-items:center;gap:8px}
+  .cmdline .copybtn{background:var(--panel2);border:1px solid var(--line);border-radius:5px;color:var(--mute);font-size:10px;padding:2px 7px;cursor:pointer;flex-shrink:0}
+  .cmdline .copybtn:hover{color:var(--accent);border-color:var(--accent)}
+  pre.out_body{background:#080a0f;border:1px solid var(--line);border-radius:9px;padding:11px;overflow:auto;margin:0;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;max-height:calc(100vh - 300px)}
+  .rendered-box{background:#080a0f;border:1px solid var(--line);border-radius:9px;padding:11px;overflow:auto;max-height:calc(100vh - 300px)}
+  .fmt-tabs{display:flex;gap:4px;margin-bottom:8px}
+  .fmt-tab{background:var(--panel);border:1px solid var(--line);border-radius:7px 7px 0 0;padding:5px 14px;font-size:11.5px;font-weight:600;cursor:pointer;color:var(--mute);border-bottom:none;transition:.12s}
+  .fmt-tab:hover{color:var(--text)}
+  .fmt-tab.active{background:#080a0f;color:var(--accent);border-color:var(--accent)}
+  .err{color:var(--bad)}
+  /* ── Theme toggle ── */
+  .themebtn{background:var(--panel2);border:1px solid var(--line);border-radius:6px;color:var(--mute);font-size:13px;padding:3px 8px;cursor:pointer;margin-left:6px;line-height:1}
+  .themebtn:hover{color:var(--accent);border-color:var(--accent)}
+  body.light{
+    --bg:#f5f6fa; --panel:#ffffff; --panel2:#eef1f7; --line:#d5dae6;
+    --text:#1a1f2e; --mute:#6b7390; --accent:#2c60c4; --accent2:#5b3fd4;
+    --good:#16a34a; --warn:#d97706; --bad:#dc2626;
+  }
+  body.light header{background:linear-gradient(180deg,#eef1f7,#f5f6fa)}
+  body.light .keybar{background:#eef1f7}
+  body.light nav{background:#eef1f7}
+  body.light aside.history{background:#eef1f7}
+  body.light .sc.active{background:linear-gradient(180deg,#dce6fb,#ffffff)}
+  body.light pre.out_body{background:#eef1f7}
+  body.light .rendered-box{background:#eef1f7}
+  body.light .cmdline{background:#eef1f7;color:#334155}
+  body.light .form .hd .cmdbadge{background:#eef1f7}
+  body.light input[type=text],body.light select{background:#eef1f7}
+  body.light .keywrap input{background:#eef1f7}
+  /* ── Group filter chips ── */
+  .grpbar{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px}
+  .grp{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 9px;font-size:10px;font-weight:600;color:var(--mute);cursor:pointer;transition:.12s;white-space:nowrap}
+  .grp:hover{color:var(--text);border-color:var(--accent)}
+  .grp.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  /* ── Group badge on skill card ── */
+  .sc{position:relative}
+  .sc .gbad{position:absolute;top:5px;right:6px;font-size:9px;padding:1px 5px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);color:var(--mute);font-weight:700;letter-spacing:.3px;line-height:1.3}
+  .sc .body{padding-right:38px}
+  .sc[data-grp="token"] .gbad{background:rgba(91,157,255,.12);color:#7ab0ff;border-color:rgba(91,157,255,.3)}
+  .sc[data-grp="wallet"] .gbad{background:rgba(124,91,255,.12);color:#a58bff;border-color:rgba(124,91,255,.3)}
+  .sc[data-grp="discover"] .gbad{background:rgba(245,158,11,.12);color:#ffb94d;border-color:rgba(245,158,11,.3)}
+</style>
+</head>
+<body>
+<header>
+  <h1>🧪 Birdeye Skills · Test Console</h1>
+  <span class="status" id="status"></span>
+  <button class="themebtn" id="themeBtn" title="Toggle light/dark">🌙</button>
+</header>
+
+<div class="keybar">
+  <label>🔑 API Key</label>
+  <div class="keywrap">
+    <input type="password" id="apiKey" placeholder="paste Birdeye API key (kept in browser session + server)" autocomplete="off" />
+    <button class="keybtn" id="toggleKey" title="Show / hide">👁</button>
+  </div>
+  <button class="keysave" id="saveKey">Set</button>
+  <span class="pill" id="keyStatus">not set</span>
+</div>
+
+<div class="layout">
+  <nav id="skillList"></nav>
+  <section class="out">
+    <div class="form" id="formArea"></div>
+    <div id="cmdLineArea" style="display:none"></div>
+    <div class="meta" id="metaArea"></div>
+    <div class="fmt-tabs" id="fmtTabs" style="display:none">
+      <button class="fmt-tab active" data-fmt="ui">🖥 UI</button>
+      <button class="fmt-tab" data-fmt="plain">📄 Plain</button>
+      <button class="fmt-tab" data-fmt="telegram">✈️ Telegram</button>
+      <button class="fmt-tab" data-fmt="json">{ } JSON</button>
+    </div>
+    <div id="outputArea"></div>
+  </section>
+  <aside class="history">
+    <h3>🕐 History <button id="refreshHistory" title="Refresh">↻</button></h3>
+    <div id="historyList"></div>
+  </aside>
+</div>
+
+<script>
+/* ──────────────────────────────────────────────
+   Skills registry — full filter set per skill
+   Each skill: {id, icon, name, cmd, type, cu, inputs[]}
+   input types: text | select | checkbox | textarea
+   ────────────────────────────────────────────── */
+const CHAINS = ["sol","bsc","base","eth","arc","robinhood","ethw"];
+const FORMATS = {
+  list: ["raw-json","plain","telegram"],
+  token: ["rendered","plain","telegram","raw-json"],
+  wallet: ["rendered","plain","telegram","raw-json"],
+};
+
+const GROUPS = {
+  all:      {label:"All",     badge:"ALL", icon:"✦"},
+  discover: {label:"Discover",badge:"DSC", icon:"🔥"},
+  token:    {label:"Token",   badge:"TKN", icon:"🔍"},
+  wallet:   {label:"Wallet",  badge:"WAL", icon:"📊"},
+};
+
+const SKILLS = [
+  {id:"tl", icon:"🔥", name:"Trending List", desc:"Top trending tokens by volume/mcap/liquidity with platform filter", cmd:"trending-list", type:"list", group:"discover", cu:"30-50",
+   inputs:[
+     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+     {k:"interval",label:"Interval",type:"select",opts:["1h","4h","24h"],def:"1h"},
+     {k:"source",label:"Source",type:"select",opts:["v3-list","trending"],def:"v3-list"},
+     {k:"sort_by",label:"Sort by",type:"select",opts:["volumeUSD","market_cap","liquidity","trade_count","holder","rank"],def:"volumeUSD"},
+     {k:"platform",label:"Platform",type:"select",opts:["","pump.fun","moonshot","raydium","jupiter studio","meteora dbc"],def:""},
+     {k:"limit",label:"Limit",type:"text",def:"20"},
+   ]},
+  {id:"dd", icon:"🔍", name:"Token DD", desc:"Full token due diligence: scores, holders, liquidity, security (+optional risk history)", cmd:"token-dd", type:"token", group:"token", cu:"~71",
+   inputs:[
+     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+     {k:"address",label:"Token",type:"text",def:"",placeholder:"token address"},
+     {k:"include",label:"Include (+CU)",type:"select",opts:["","list","advanced_security","risk_history","list,advanced_security"],def:""},
+   ]},
+  {id:"contract_dd", icon:"🛡️", name:"Contract DD", desc:"Contract security audit + honeypot/mint/blacklist checks + kline pattern", cmd:"contract-dd", type:"token", group:"token", cu:"~86",
+   inputs:[
+     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+     {k:"address",label:"Token",type:"text",def:"",placeholder:"token address"},
+     {k:"skip_kline",label:"Skip kline",type:"checkbox",def:false},
+   ]},
+  {id:"rugcheck", icon:"🧪", name:"RugCheck Audit", desc:"Full rugcheck security + risk history + holder concentration + liquidity lock", cmd:"rugcheck-audit", type:"token", group:"token", cu:"~142",
+   inputs:[
+     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+     {k:"address",label:"Token",type:"text",def:"",placeholder:"token address"},
+     {k:"rug_liq_window",label:"Liq window",type:"select",opts:["1h","4h","8h","24h"],def:"24h"},
+     {k:"rug_holders_top_n",label:"Holders top N",type:"text",def:"20"},
+   ]},
+  {id:"kline", icon:"🕯️", name:"Kline Pattern", desc:"Candlestick pattern detection + score + support/resistance levels", cmd:"kline-pattern", type:"token", group:"token", cu:"25-100",
+   inputs:[
+     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+     {k:"address",label:"Token",type:"text",def:"",placeholder:"token address"},
+     {k:"resolution",label:"Resolution",type:"select",opts:["1m","5m","15m","30m","1h","4h","1d"],def:"15m"},
+     {k:"window",label:"Window",type:"select",opts:["1d","3d","7d","14d","30d"],def:"7d"},
+   ]},
+  {id:"wallet_score", icon:"📊", name:"Wallet Score", desc:"0-100 alpha score (profit/consistency/quality/activity) + copy-tradeability score", cmd:"wallet-score", type:"wallet", group:"wallet", cu:"30-110",
+   inputs:[
+     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+     {k:"wallet",label:"Wallet",type:"text",def:"",placeholder:"wallet address"},
+     {k:"duration",label:"Duration",type:"select",opts:["24h","7d","30d","90d","all"],def:"30d"},
+     {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
+     {k:"skip_rug",label:"Skip rug",type:"checkbox",def:false},
+     {k:"skip_portfolio",label:"Skip portfolio",type:"checkbox",def:false},
+     {k:"skip_first_tx",label:"Skip first-tx",type:"checkbox",def:false},
+     {k:"include_style",label:"Include style",type:"checkbox",def:false},
+   ]},
+  {id:"wallet_style", icon:"🎭", name:"Wallet Style", desc:"Trading style fingerprint: frequency × pnl × hold-time archetype with emoji tag", cmd:"wallet-style", type:"wallet", group:"wallet", cu:"~90",
+   inputs:[
+     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+     {k:"wallet",label:"Wallet",type:"text",def:"",placeholder:"wallet address"},
+     {k:"duration",label:"Duration",type:"select",opts:["7d","30d"],def:"30d"},
+     {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
+     {k:"skip_tx_list",label:"Skip tx-list",type:"checkbox",def:false},
+     {k:"skip_first_tx",label:"Skip first-tx",type:"checkbox",def:false},
+   ]},
+  {id:"wallet_analysis", icon:"📈", name:"Wallet Analysis", desc:"Multi-interval PnL (24h→all) + top tokens + portfolio + realized/unrealized breakdown", cmd:"wallet-analysis", type:"wallet", group:"wallet", cu:"~240",
+   inputs:[
+     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+     {k:"wallet",label:"Wallet",type:"text",def:"",placeholder:"wallet address"},
+     {k:"intervals",label:"Intervals",type:"text",def:"24h,7d,30d,90d,all"},
+     {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
+     {k:"skip_tx_list",label:"Skip tx-list",type:"checkbox",def:false},
+     {k:"skip_first_tx",label:"Skip first-tx",type:"checkbox",def:false},
+     {k:"skip_portfolio",label:"Skip portfolio",type:"checkbox",def:false},
+   ]},
+  {id:"sm_profile", icon:"🎯", name:"Smart Money Profile", desc:"Smart-money wallet profile: pnl, win rate, net worth, top trades, holding style", cmd:"smart-money-profile", type:"wallet", group:"wallet", cu:"~120",
+   inputs:[
+     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+     {k:"wallet",label:"Wallet",type:"text",def:"",placeholder:"wallet address"},
+     {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
+     {k:"skip_tx_list",label:"Skip tx-list",type:"checkbox",def:false},
+     {k:"skip_first_tx",label:"Skip first-tx",type:"checkbox",def:false},
+   ]},
+  {id:"sm_leaderboard", icon:"🏆", name:"Smart Money Leaderboard", desc:"Rank multiple wallets by alpha score, PnL, win rate — compare side by side", cmd:"smart-money-leaderboard", type:"wallet", group:"wallet", cu:"90/w",
+   inputs:[
+     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+     {k:"wallet",label:"Wallets (comma-sep)",type:"text",def:"",placeholder:"addr1,addr2,..."},
+     {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
+   ]},
+  {id:"smart_wallets", icon:"💰", name:"Smart Wallets", desc:"Discover top smart-money wallets by net worth, win rate, PnL — FAST/STD/DEEP", cmd:"smart-wallets", type:"list", group:"discover", cu:"30-500",
+   inputs:[
+     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+     {k:"depth",label:"Depth",type:"select",opts:["fast","standard","deep"],def:"fast"},
+     {k:"min_trades",label:"Min trades",type:"text",def:"15"},
+     {k:"min_unique",label:"Min unique",type:"text",def:"8"},
+     {k:"pass_score",label:"Pass score",type:"text",def:"70"},
+     {k:"limit",label:"Limit",type:"text",def:"20"},
+   ]},
+];
+
+let currentSkill = SKILLS[0];
+let currentFmt = "ui";
+let currentGroup = "all";
+let lastRunId = null;
+let lastRenderedHtml = "";
+let lastPlain = "";
+let lastJson = "";
+
+/* ── API key ── */
+const keyInput = document.getElementById('apiKey');
+const toggleKeyBtn = document.getElementById('toggleKey');
+const saveKeyBtn = document.getElementById('saveKey');
+const keyStatus = document.getElementById('keyStatus');
+
+// restore from localStorage
+try { const saved = localStorage.getItem('be_apikey'); if(saved){ keyInput.value = saved; } } catch(e){}
+
+toggleKeyBtn.onclick = () => {
+  const t = keyInput.type;
+  keyInput.type = t === 'password' ? 'text' : 'password';
+  toggleKeyBtn.textContent = t === 'password' ? '🙈' : '👁';
+};
+
+async function applyKey(persist=false){
+  const key = keyInput.value.trim();
+  if(!key){ keyStatus.textContent = 'empty'; keyStatus.style.color='var(--bad)'; return false; }
+  try{
+    const res = await fetch('/api/set-key',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({key,persist})});
+    const j = await res.json();
+    if(j.ok){
+      keyStatus.textContent = persist ? 'saved ✓' : 'set (session) ✓';
+      keyStatus.style.color = 'var(--good)';
+      if(persist){ try{ localStorage.setItem('be_apikey', key); }catch(e){} }
+      return true;
+    } else {
+      keyStatus.textContent = 'failed: '+(j.error||'?');
+      keyStatus.style.color = 'var(--bad)';
+      return false;
+    }
+  }catch(e){
+    keyStatus.textContent = 'err: '+e.message;
+    keyStatus.style.color = 'var(--bad)';
+    return false;
+  }
+}
+
+saveKeyBtn.onclick = () => applyKey(true);
+keyInput.addEventListener('keydown', e => { if(e.key==='Enter'){ e.preventDefault(); applyKey(false); } });
+
+async function checkKey(){
+  try{
+    const res = await fetch('/api/key-info');
+    const j = await res.json();
+    if(j.key_set){
+      keyStatus.textContent = 'server key: '+ (j.mask||'set');
+      keyStatus.style.color = 'var(--good)';
+    } else {
+      keyStatus.textContent = 'no server key';
+      keyStatus.style.color = 'var(--warn)';
+    }
+  }catch(e){}
+}
+checkKey();
+
+/* ── Format tabs ── */
+document.querySelectorAll('.fmt-tab').forEach(t=>t.onclick=()=>switchFormat(t.dataset.fmt));
+function setFmt(fmt){
+  currentFmt = fmt;
+  document.querySelectorAll('.fmt-tab').forEach(t=>t.classList.toggle('active', t.dataset.fmt===fmt));
+}
+async function switchFormat(fmt){
+  setFmt(fmt);
+  const out = document.getElementById('outputArea');
+  if(fmt==='ui'){
+    out.innerHTML = lastRenderedHtml ? `<div class="rendered-box">${lastRenderedHtml}</div>` : '<div class="rendered-box">No UI output yet.</div>';
+    return;
+  }
+  if(!lastRunId){
+    out.innerHTML = '<div class="rendered-box">Run a skill first to see other formats.</div>';
+    return;
+  }
+  // plain → cached plain, telegram → cached telegram, json → cached raw-json
+  const serverFmt = fmt==='json' ? 'raw-json' : (fmt==='plain' ? 'plain' : 'telegram');
+  out.innerHTML = '<div class="rendered-box">Loading cached output (0 CU)…</div>';
+  try{
+    const res = await fetch('/api/history/render?runId='+encodeURIComponent(lastRunId)+'&format='+serverFmt);
+    const j = await res.json();
+    let txt = j.stdout || j.payload || '';
+    if(typeof txt==='object' && txt!==null) txt = JSON.stringify(txt,null,2);
+    txt = String(txt).replace(/^#RUN_ID[^\n]*\n?/, '').trim();
+    if(fmt==='json' && (txt.startsWith('{')||txt.startsWith('['))){
+      try{ txt = JSON.stringify(JSON.parse(txt),null,2); }catch{}
+    }
+    out.innerHTML = txt ? `<pre class="out_body">${esc(txt)}</pre>` : '<pre class="out_body">No output.</pre>';
+  }catch(e){
+    out.innerHTML = `<pre class="out_body err">${esc(String(e))}</pre>`;
+  }
+}
+
+/* ── Skill list ── */
+function renderSkillList(){
+  const el = document.getElementById('skillList');
+  // group filter chips
+  let chips = '<div class="grpbar">';
+  Object.keys(GROUPS).forEach(g=>{
+    const count = g==='all' ? SKILLS.length : SKILLS.filter(s=>s.group===g).length;
+    chips += `<button class="grp ${currentGroup===g?'active':''}" data-grp="${g}">${GROUPS[g].icon} ${GROUPS[g].label} <span style="opacity:.6">${count}</span></button>`;
+  });
+  chips += '</div>';
+  const list = SKILLS.filter(s=>currentGroup==='all'||s.group===currentGroup);
+  const cards = list.map(s=>{
+    const g = GROUPS[s.group]||{badge:'?'};
+    return `<div class="sc ${s.id===currentSkill.id?'active':''}" data-id="${s.id}" data-grp="${s.group}">
+      <div class="gbad" title="${g.label}">${g.badge}</div>
+      <div class="ic">${s.icon}</div>
+      <div class="body">
+        <div class="nm">${s.name}</div>
+        <div class="ds">${s.desc||s.cmd}</div>
+        <div class="cu">${s.cu} CU</div>
+      </div>
+    </div>`;
+  }).join('');
+  el.innerHTML = chips + (cards || '<div class="h-empty">no skills in this group</div>');
+  el.querySelectorAll('.grp').forEach(c=>c.onclick=()=>{currentGroup=c.dataset.grp;renderSkillList();});
+  el.querySelectorAll('.sc').forEach(c=>c.onclick=()=>{currentSkill=SKILLS.find(x=>x.id===c.dataset.id);renderSkillList();renderForm();});
+}
+
+/* ── Form ── */
+function renderForm(){
+  const el = document.getElementById('formArea');
+  const s = currentSkill;
+  let html = `<div class="hd"><span class="ttl">${s.icon} ${s.name}</span><span class="cmdbadge" id="cmdBadge" title="Click to copy command">📋 <span id="cmdText">${s.cmd}</span></span></div>`;
+  html += '<div class="grid">';
+  s.inputs.forEach(i=>{
+    if(i.type==='select'){
+      html += `<div class="field"><label>${i.label}</label><select id="inp_${i.k}">${i.opts.map(o=>`<option value="${o}" ${o===i.def?'selected':''}>${o||'(all)'}</option>`).join('')}</select></div>`;
+    } else if(i.type==='checkbox'){
+      html += `<div class="field" style="justify-content:flex-end;padding-bottom:4px"><label>&nbsp;</label><label class="checks" style="margin-top:6px"><input type="checkbox" id="inp_${i.k}" ${i.def?'checked':''}/> ${i.label}</label></div>`;
+    } else {
+      html += `<div class="field"><label>${i.label}</label><input type="text" id="inp_${i.k}" value="${i.def||''}" placeholder="${i.placeholder||i.label}"></div>`;
+    }
+  });
+  html += '</div>';
+  html += `<div class="rowrun"><button class="run" id="runBtn">▶ Run</button><span class="runhint">${s.cu} CU · full filters</span></div>`;
+  el.innerHTML = html;
+  document.getElementById('runBtn').onclick = runSkill;
+  document.getElementById('cmdBadge').onclick = () => copyCmd();
+  updateCmdPreview();
+  // update cmd preview on input change
+  s.inputs.forEach(i=>{
+    const el2 = document.getElementById('inp_'+i.k);
+    if(el2) el2.addEventListener('change', updateCmdPreview);
+    if(el2 && i.type==='text') el2.addEventListener('input', updateCmdPreview);
+  });
+}
+
+function getInputVals(){
+  const s = currentSkill;
+  const vals = {};
+  s.inputs.forEach(i=>{
+    const el = document.getElementById('inp_'+i.k);
+    if(!el) return;
+    if(i.type==='checkbox') vals[i.k] = el.checked;
+    else vals[i.k] = el.value;
+  });
+  return vals;
+}
+
+function buildArgv(formatOverride){
+  const s = currentSkill;
+  const argv = [s.cmd];
+  const vals = getInputVals();
+  s.inputs.forEach(i=>{
+    let v = vals[i.k];
+    if(i.type==='checkbox'){
+      if(v) argv.push('--'+i.k.replace(/_/g,'-'));
+      return;
+    }
+    if(v===undefined || v===null) return;
+    v = String(v).trim();
+    if(!v && i.k!=='include') return;
+    // leaderboard wallets: comma-sep → repeated --wallet
+    if(s.id==='sm_leaderboard' && i.k==='wallet'){
+      const parts = v.split(',').map(x=>x.trim()).filter(Boolean);
+      parts.forEach(p=>argv.push('--wallet', p));
+      return;
+    }
+    const flag = '--'+i.k.replace(/_/g,'-');
+    if(v) argv.push(flag, v);
+  });
+  const fmt = formatOverride || (s.type==='list' ? 'raw-json' : 'rendered');
+  argv.push('--format', fmt);
+  return argv;
+}
+
+function cmdString(argv){
+  return 'python3 birdeye_cli.py ' + argv.map(a=>/^[A-Za-z0-9_=./:-]+$/.test(a)?a:'"'+a+'"').join(' ');
+}
+
+function updateCmdPreview(){
+  const argv = buildArgv();
+  document.getElementById('cmdText').textContent = cmdString(argv);
+}
+
+function copyCmd(){
+  const argv = buildArgv();
+  const txt = cmdString(argv);
+  navigator.clipboard?.writeText(txt).then(()=>{
+    const b = document.getElementById('cmdBadge');
+    const orig = b.innerHTML;
+    b.innerHTML = '✓ copied';
+    setTimeout(()=>{ b.innerHTML = orig; }, 1200);
+  }).catch(()=>{});
+}
+
+function esc(s){ return String(s).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
+
+/* ── Run ── */
+async function runSkill(){
+  const s = currentSkill;
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  document.getElementById('status').textContent = 'running…';
+  document.getElementById('metaArea').innerHTML = '';
+  document.getElementById('outputArea').innerHTML = '<div class="rendered-box">Loading…</div>';
+  const argv = buildArgv();
+  const cmdArea = document.getElementById('cmdLineArea');
+  cmdArea.style.display = 'block';
+  cmdArea.innerHTML = `<div class="cmdline"><button class="copybtn" id="copyCmdBtn">📋</button><span>${esc(cmdString(argv))}</span></div>`;
+  document.getElementById('copyCmdBtn').onclick = copyCmd;
+  try{
+    const res = await fetch('/api/run',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({script:'birdeye_cli',argv})});
+    const j = await res.json();
+    showResult(j);
+    loadHistory();
+  }catch(e){
+    document.getElementById('outputArea').innerHTML = `<pre class="out_body err">${esc(String(e))}</pre>`;
+  }finally{
+    btn.disabled = false;
+    document.getElementById('status').textContent = '';
+  }
+}
+
+function showResult(j){
+  let stdout = j.stdout||'';
+  const stderr = j.stderr||'';
+  stdout = stdout.replace(/^#RUN_ID[^\n]*\n?/, '');
+  const meta = [];
+  meta.push(`<span class="chip">exit ${j.exit}</span>`);
+  if(j.duration_ms) meta.push(`<span class="chip">${(j.duration_ms/1000).toFixed(1)}s</span>`);
+  const runMatch = (stderr+'\n'+j.stdout).match(/#RUN_ID\s+(\S+)/);
+  if(runMatch){ lastRunId = runMatch[1]; meta.push(`<span class="chip">${runMatch[1]}</span>`); }
+  const cuMatch = (stderr+'\n'+j.stdout).match(/cu=(\d+)/);
+  if(cuMatch) meta.push(`<span class="chip cu-chip">${cuMatch[1]} CU</span>`);
+  document.getElementById('metaArea').innerHTML = meta.join('');
+  document.getElementById('fmtTabs').style.display = 'flex';
+  setFmt('ui');
+
+  const trimmed = stdout.trim();
+  // Build all 3 formats
+  lastRenderedHtml = '';
+  lastPlain = '';
+  lastJson = '';
+
+  if(trimmed.startsWith('<')){
+    lastRenderedHtml = trimmed;
+    lastPlain = trimmed;
+    lastJson = '';
+  } else if(trimmed.startsWith('{')||trimmed.startsWith('[')){
+    try{
+      const obj = JSON.parse(trimmed);
+      lastJson = JSON.stringify(obj,null,2);
+      if(obj && typeof obj==='object' && obj.html){
+        lastRenderedHtml = obj.html;
+      } else {
+        lastRenderedHtml = `<pre class="out_body">${esc(lastJson)}</pre>`;
+      }
+      lastPlain = lastJson;
+    }catch{
+      lastRenderedHtml = `<pre class="out_body">${esc(trimmed)}</pre>`;
+      lastPlain = trimmed;
+    }
+  } else {
+    lastRenderedHtml = `<pre class="out_body">${esc(trimmed)}</pre>`;
+    lastPlain = trimmed;
+  }
+
+  document.getElementById('outputArea').innerHTML = lastRenderedHtml
+    ? `<div class="rendered-box">${lastRenderedHtml}</div>`
+    : '<div class="rendered-box">No output.</div>';
+
+  if(stderr) console.log('stderr:', stderr);
+}
+
+/* ── History ── */
+async function loadHistory(){
+  try{
+    const res = await fetch('/api/history/list?limit=30');
+    const j = await res.json();
+    const el = document.getElementById('historyList');
+    const items = j.items || [];
+    if(!items.length){ el.innerHTML = '<div class="h-empty">no history yet</div>'; return; }
+    el.innerHTML = items.map(it=>{
+      const rid = it.runId || it.run_id || '';
+      const summary = it.summary || it.kind || '?';
+      const detail = it.detail || '';
+      return `<div class="h-item" data-ri="${rid}"><div class="hk">${esc(summary)}</div><div class="hd">${esc(detail)}${rid?(' · '+rid.slice(-8)):''}</div></div>`;
+    }).join('');
+    el.querySelectorAll('.h-item').forEach(c=>c.onclick=()=>replayHistory(c.dataset.ri));
+  }catch(e){
+    document.getElementById('historyList').innerHTML = `<div class="h-empty err">${esc(String(e))}</div>`;
+  }
+}
+
+async function replayHistory(runId){
+  if(!runId) return;
+  lastRunId = runId;
+  document.getElementById('status').textContent = 'replaying (0 CU)…';
+  setFmt('ui');
+  document.getElementById('outputArea').innerHTML = '<div class="rendered-box">Loading cached run…</div>';
+  try{
+    const res = await fetch('/api/history/render?runId='+encodeURIComponent(runId)+'&format=render');
+    const payload = await res.json();
+    if(payload && typeof payload==='object' && payload.html){
+      lastRenderedHtml = payload.html;
+    } else if(payload && typeof payload==='object' && payload.payload){
+      const p = payload.payload;
+      lastRenderedHtml = (p && p.html) ? p.html : `<pre class="out_body">${esc(JSON.stringify(payload,null,2))}</pre>`;
+    } else {
+      lastRenderedHtml = `<pre class="out_body">${esc(JSON.stringify(payload,null,2))}</pre>`;
+    }
+    const meta = [];
+    meta.push('<span class="chip">cached</span>');
+    meta.push(`<span class="chip">0 CU</span>`);
+    if(runId) meta.push(`<span class="chip">${runId}</span>`);
+    document.getElementById('metaArea').innerHTML = meta.join('');
+    document.getElementById('fmtTabs').style.display = 'flex';
+    document.getElementById('outputArea').innerHTML = `<div class="rendered-box">${lastRenderedHtml}</div>`;
+  }catch(e){
+    document.getElementById('outputArea').innerHTML = `<pre class="out_body err">${esc(String(e))}</pre>`;
+  }finally{
+    document.getElementById('status').textContent = '';
+  }
+}
+
+document.getElementById('refreshHistory').onclick = loadHistory;
+
+/* ── Theme toggle ── */
+const themeBtn = document.getElementById('themeBtn');
+try{ if(localStorage.getItem('be_theme')==='light'){ document.body.classList.add('light'); themeBtn.textContent='☀️'; } }catch(e){}
+themeBtn.onclick = () => {
+  const isLight = document.body.classList.toggle('light');
+  themeBtn.textContent = isLight ? '☀️' : '🌙';
+  try{ localStorage.setItem('be_theme', isLight?'light':'dark'); }catch(e){}
+};
+
+/* ── Keyboard shortcuts: 1=All, 2=Discover, 3=Token, 4=Wallet (not in input) ── */
+const GROUP_KEYS = {'1':'all','2':'discover','3':'token','4':'wallet'};
+document.addEventListener('keydown', e => {
+  const tag = (e.target.tagName||'').toLowerCase();
+  if(tag==='input'||tag==='select'||tag==='textarea') return;
+  if(GROUP_KEYS[e.key]){
+    currentGroup = GROUP_KEYS[e.key];
+    renderSkillList();
+  }
+});
+
+renderSkillList();
+renderForm();
+loadHistory();
+</script>
+</body>
+</html>
