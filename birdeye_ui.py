@@ -107,7 +107,6 @@ ALLOWED_SCRIPTS = {
     "birdeye_cli": str(CLI_PATH),
     "birdeye_screener": str(SCREENER_PATH),
     "birdeye_trending_simple": str(SIMPLE_PATH),
-    "stc": str(SKILL_SCREENER / "scripts" / "stc.py"),
 }
 PY = sys.executable
 
@@ -260,15 +259,13 @@ _30_SKILLS_CATALOG = [
         {"id": "new_pair", "title": "Skill #2 · New Pairs", "cu": "TBD", "status": "wip",
          "desc": "Recently launched tokens sorted by age"},
     ]},
-    {"cat": "🛡 Token Due Diligence (5)", "items": [
+    {"cat": "🛡 Token Due Diligence (4)", "items": [
         {"id": "dd", "title": "Skill #3 · Token DD (Should I Buy?)", "cu": "71 CU", "status": "live",
          "desc": "overview+money_flow+security+SM join → A/B/C/D/F/NG rating (birdeye-dd-workflow step 10)"},
         {"id": "security", "title": "Skill #4 · Security + LP Concentration", "cu": "75 CU", "status": "wip",
          "desc": "token_security + /holder/v1/distribution + /defi/v2/markets join = LP holder% + top50 (step 3/4/9)"},
         {"id": "contract_dd", "title": "Skill #5 · Contract DD", "cu": "86 CU", "status": "live",
          "desc": "Composite 0-100 score: contract safety 45% + holder structure 30% + price action 25%. mint/freeze/LP/taxes + top10 + kline pattern."},
-        {"id": "stc", "title": "Skill #6 · Spam Token Cleaner (stc)", "cu": "~70 CU min · 0 holder CU (Web scrape)", "status": "live", "source": "birdeye",
-         "desc": "V3 token/list sweep (MC ≥ $1B AND V24h ≤ $50) × solana→robinhood→base→bsc→eth · Web scrape holder top1/top10% (0 Birdeye CU holder cost) + identity batch labels. Final sort: MC desc → Top Wallet Value desc → Liq desc → V24h asc. Export plain / telegram / rendered UI / raw-json."},
         {"id": "compare", "title": "Skill #7 · Multi-Token Compare Rating", "cu": "× N CU", "status": "wip",
          "desc": "side-by-side DD A-F rating of 3-5 tokens"},
     ]},

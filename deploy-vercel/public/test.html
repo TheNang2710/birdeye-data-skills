@@ -292,11 +292,6 @@ const SKILLS = [
     {k:"address",label:"Token",type:"text",def:""},
     {k:"skip_kline",label:"Skip kline",type:"checkbox",def:false},
   ]},
-  {id:"stc", icon:"🧹", name:"Spam Token Cleaner", desc:"Filter out scam/spam tokens from a list", cmd:"", script:"stc", type:"list", cu:"~70", inputs:[
-    {k:"chains",label:"Chains",type:"text",def:"solana"},
-    {k:"min_mc",label:"Min MC",type:"text",def:"1000000"},
-    {k:"max_vol",label:"Max Vol",type:"text",def:"50000"},
-  ]},
   {id:"rugcheck", icon:"🧪", name:"RugCheck Audit", desc:"Full rugcheck security + risk history audit", cmd:"rugcheck-audit", type:"token", cu:"~142", fmt:"ui", inputs:[
     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
     {k:"address",label:"Token",type:"text",def:""},
@@ -551,7 +546,6 @@ const FLOW_BY_ID = {
   tl:{doc:"trending-list-workflow.md",steps:["Pick chain + interval (1h/4h/24h)","Pick source (v3-list / trending) and sort field","Fetch the trending list from Birdeye","Scan the list and open Token DD on candidates"],prompt:"List the top trending Solana tokens over the last hour by volume, and flag any with suspicious liquidity."},
   dd:{doc:"token-dd-workflow.md",steps:["Paste the token address","Run the 10-step DD: overview + security + smart money + activity","Read the A-F grade and the BUY/SELL verdict","Drill into holders / risk tabs"],prompt:"Run a full due-diligence on this token and tell me whether it is safe to buy."},
   contract_dd:{doc:"contract-dd-workflow.md",steps:["Paste the contract address","Compute sub-scores: Safety 45% · Holders 30% · Price 25%","Map the composite score to a tier (Safe/Caution/Risky/Danger)","Inspect the formula breakdown table"],prompt:"Scan this contract for mint/freeze authority, LP lock and holder concentration."},
-  stc:{doc:"skill-06-spam-token-cleaner.md",steps:["Set chains + min MC + max volume","Filter out scam/spam tokens","Return the cleaned list"],prompt:"Filter spam tokens out of this list — keep only mcap above $1M with real volume."},
   rugcheck:{doc:"skill-17b-rugcheck-audit.md",steps:["Paste the token address","Fetch security + risk history + holder distribution","Build the 7 risk cards","Review Overview/Markets/Insiders/Holders/Lockers"],prompt:"Run a full rugcheck audit and list every risk with its severity."},
   kline:{doc:"skill-21-kline-pattern.md",steps:["Paste the token and pick resolution/window","Fetch OHLCV candles","Detect candlestick patterns","Score the price action"],prompt:"Analyse the 15m candles for this token and identify the current pattern."},
   trending_score:{doc:"skill-22-token-trending-score.md",steps:["Paste the token address","Fetch OHLCV (1s/1m) + liquidity + holders + security","Score Volume/Swap/Price/Liquidity/Holder momentum","Apply the security cap and return the 0-100 score"],prompt:"Score how strongly this token is trending right now across all intervals."},
