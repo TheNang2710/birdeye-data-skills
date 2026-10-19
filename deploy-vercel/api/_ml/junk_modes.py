@@ -532,7 +532,8 @@ def build_shared_metrics(token: dict[str, Any]) -> dict[str, float | None]:
     if holder is not None and holder > 0 and vol is not None:
         vol_per_holder = vol / holder
     return {
-        "liquid_depth_usd": liq,
+        "liquidity_usd": liq,
+        "liquid_depth_log10": log_liq if liq is not None and liq > 0 else None,
         "val_liq_gap": val_liq_gap,
         "liq_vol_gap": liq_vol_gap,
         "vol_per_holder_usd": vol_per_holder,

@@ -547,7 +547,10 @@ def run_script_argv(script_alias: str, argv: list[str], ui_key: str | None = Non
         return {"exit": 2, "stdout": "", "stderr": f"script not allowed: {script_alias}", "duration_ms": 0}
     script_path = ALLOWED_SCRIPTS[script_alias]
     for tok in argv:
-        if isinstance(tok, str) and any(c in tok for c in ";&|`$<>\\\n'\""):
+        # argv is passed directly to subprocess.run([...]) without a shell,
+        # so multiline text inputs like token lists are safe and should not
+        # be rejected here. Only guard against embedded NUL bytes.
+        if isinstance(tok, str) and "\x00" in tok:
             return {"exit": 2, "stdout": "", "stderr": f"invalid token: {tok!r}", "duration_ms": 0}
 
     resolved_key, _src = resolve_key(ui_key)

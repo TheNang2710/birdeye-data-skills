@@ -139,7 +139,7 @@ def _serialize_trend_payload(r: dict, args) -> dict:
         "latency_ms": r["latency_ms"],
         "cu_used_total": r["cu_used"],
         "sort_note": r["sort_note"],
-        "format_renderers": ["render", "plain", "telegram", "raw-json"],
+        "format_renderers": ["ui", "plain", "telegram", "json"],
     }
 
 
@@ -172,6 +172,47 @@ def _read_cache(cdir: Path, run_id: str) -> dict | None:
         return json.loads(fp.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def _canonical_format(fmt: str | None, *, default: str = "ui",
+                      allow_compact: bool = False,
+                      allow_rugcheck: bool = False) -> str:
+    f = str(fmt or default).strip().lower()
+    if f in {"ui", "plain", "telegram", "json"}:
+        return f
+    if f in {"render", "rendered", "scorecard"}:
+        return "ui"
+    if f == "raw-json":
+        return "json"
+    if allow_compact and f == "compact":
+        return "compact"
+    if allow_rugcheck and f == "rugcheck":
+        return "rugcheck"
+    return default
+
+
+def _cache_field_for_format(fmt: str | None) -> str | None:
+    f = _canonical_format(fmt)
+    return {
+        "plain": "rendered_plain",
+        "telegram": "rendered_telegram",
+        "json": "rendered_json",
+        "ui": "rendered_ui",
+    }.get(f)
+
+
+def _cache_text_for_format(payload: dict, fmt: str | None) -> str | None:
+    field = _cache_field_for_format(fmt)
+    legacy_map = {
+        "rendered_ui": "rendered_rendered",
+        "rendered_json": "rendered_raw-json",
+    }
+    if field and payload.get(field) is not None:
+        return payload.get(field)
+    legacy = legacy_map.get(field or "")
+    if legacy and payload.get(legacy) is not None:
+        return payload.get(legacy)
+    return payload.get("out")
 
 
 def _render_trend_from_cache(payload: dict, fmt: str, run_id: str, args_ref=None):
@@ -218,7 +259,8 @@ def _render_trend_from_cache(payload: dict, fmt: str, run_id: str, args_ref=None
         offset = payload["params"]["offset"]
 
     inner_args = args_ref or _Args()
-    if fmt == "raw-json":
+    fmt = _canonical_format(fmt)
+    if fmt in {"ui", "json"}:
         print(json.dumps({
             "runId": run_id, "cached": True, "cu_used_total": 0,
             "payload": payload,
@@ -572,6 +614,7 @@ def _print_trend_telegram(r, args):
 
 
 def cmd_trending(args):
+    fmt = _canonical_format(getattr(args, "format", None))
     cdir = _cache_dir(getattr(args, "cache_dir", None))
     _prune_old_cache(cdir, max_age_hours=24)
     nocache: bool = bool(getattr(args, "nocache", False))
@@ -587,7 +630,7 @@ def cmd_trending(args):
         if not cached or cached.get("kind") != "trending-list":
             print(f"[E] Cache run_id not found or invalid: {from_cache}")
             return 3
-        _render_trend_from_cache(cached, args.format, from_cache, args_ref=args)
+        _render_trend_from_cache(cached, fmt, from_cache, args_ref=args)
         return 0
     key = _load_key()
     if not key:
@@ -607,12 +650,12 @@ def cmd_trending(args):
         print(f"#RUN_ID {rid}\t{fp.name}\tcu={payload['cu_used_total']}")
     else:
         rid = None
-    if args.format == "raw-json":
+    if fmt in {"ui", "json"}:
         payload = _serialize_trend_payload(r, args)
         out = {"runId": rid, "cached": False, "cu_used_total": payload["cu_used_total"], "payload": payload}
         print(json.dumps(out, ensure_ascii=False))
         return 0
-    if args.format == "telegram":
+    if fmt == "telegram":
         _print_trend_telegram(r, args)
     else:
         _print_trend_plain(r, args)
@@ -2355,6 +2398,7 @@ def cmd_dd(args):
 # ============================================================
 
 def cmd_rugcheck_audit(args):
+    fmt = _canonical_format(getattr(args, "format", None))
     cdir = _cache_dir(getattr(args, "cache_dir", None))
     _prune_old_cache(cdir, max_age_hours=24)
     nocache: bool = bool(getattr(args, "nocache", False))
@@ -2370,7 +2414,7 @@ def cmd_rugcheck_audit(args):
         if not cached or cached.get("kind") not in ("rugcheck-audit", "token-dd"):
             print(f"[E] Cache run_id not found or invalid: {from_cache}")
             return 3
-        _render_dd_from_cache(cached, args.format, from_cache)
+        _render_dd_from_cache(cached, "ui" if fmt == "ui" else fmt, from_cache)
         return 0
     key = _load_key()
     if not key:
@@ -2389,16 +2433,18 @@ def cmd_rugcheck_audit(args):
         print(f"#RUN_ID {rid}\t{fp.name}\tcu={payload['cu_used_total']}")
     else:
         rid = None
-    if args.format == "raw-json" or args.format == "render":
+    if fmt in {"ui", "json"}:
         payload = _serialize_dd_payload(d, args)
         payload["kind"] = "rugcheck-audit"
         out = {"runId": rid, "cached": False, "cu_used_total": payload["cu_used_total"], "payload": payload}
         print(json.dumps(out, ensure_ascii=False))
         return 0
-    if args.format == "scorecard":
-        _print_dd_scorecard(d, args)
-    elif args.format == "telegram":
+    if fmt == "telegram":
         _print_dd_telegram(d, args)
+    elif fmt == "plain":
+        _print_rugcheck(d, args)
+    elif str(getattr(args, "format", "")).strip().lower() == "scorecard":
+        _print_dd_scorecard(d, args)
     else:
         _print_rugcheck(d, args)
     return 0
@@ -2433,7 +2479,7 @@ def build_parser():
                          "trending = /defi/token_trending 30 CU (native Birdeye trending; may return $0 volume on Solana).")
     pt.add_argument("--platform", default=None,
                     help="v3-list only: filter platform e.g. 'pump.fun' | 'moonshot' | 'raydium' | 'meteora dbc' | 'mayhem'")
-    pt.add_argument("--format", choices=["plain", "telegram", "raw-json"], default="plain")
+    pt.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "render", "rendered"], default="ui")
     pt.set_defaults(func=cmd_trending)
 
     pd = sub.add_parser("token-dd", help='Skill #3 — "Should I buy this token?" (typ. 71 CU)')
@@ -2456,13 +2502,13 @@ def build_parser():
 
     ph = sub.add_parser("history-list", help="List recent cached runs (default last 25)")
     ph.add_argument("--limit", type=int, default=25)
-    ph.add_argument("--format", choices=["plain", "raw-json"], default="plain")
+    ph.add_argument("--format", choices=["plain", "json", "raw-json"], default="plain")
     ph.set_defaults(func=cmd_history_list)
 
     pr = sub.add_parser("history-render", help="Render a cached run_id with any format (0 API call)")
     pr.add_argument("--run-id", required=True)
-    pr.add_argument("--format", choices=["plain", "telegram", "raw-json", "render"], default="plain",
-                    help="'render' returns raw-json payload the UI renderer (DDRender/TrendRender) uses.")
+    pr.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "render", "rendered"], default="ui",
+                    help="'ui' returns the renderer payload / HTML envelope used by the console app.")
     pr.set_defaults(func=cmd_history_render)
 
     psm = sub.add_parser("smart-wallets", help="Skill #9 — Top Smart Money Wallets ranked by Net Worth, Win Rate, PnL. FAST=30CU / STD=150CU / DEEP=500CU.")
@@ -2481,7 +2527,7 @@ def build_parser():
     psm.add_argument("--pass-score", type=int, default=70, dest="pass_score",
                      help="Minimum composite score to PASS (0-100). Default 70.")
     psm.add_argument("--limit", type=int, default=20, help="Final output rows limit PASS wallets (1-100)")
-    psm.add_argument("--format", choices=["plain", "telegram", "raw-json", "scorecard"], default="plain")
+    psm.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "scorecard"], default="ui")
     psm.set_defaults(func=cmd_smart_wallets)
 
     # Skill #17b standalone RugCheck Audit — UI side='rca' drillMode='rugcheck-audit'
@@ -2498,8 +2544,8 @@ def build_parser():
                      help="Hide holder list table (top10 aggregate %% still recalculated accurate).")
     prc.add_argument("--rug-holders-top-n", dest="rug_holders_top_n", type=int, default=20,
                      help="How many holder rows render in table (default rugcheck.xyz = Top 20).")
-    prc.add_argument("--format", choices=["plain", "telegram", "raw-json", "scorecard", "render"], default="plain",
-                     help="'plain' = same-same rugcheck.xyz layout ascii. render = UI renderer payload.")
+    prc.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "scorecard", "render"], default="ui",
+                     help="'ui' = renderer payload used by the console app. 'plain' keeps the rugcheck-style ASCII view.")
     prc.set_defaults(func=cmd_rugcheck_audit)
 
     pws = sub.add_parser("wallet-score",
@@ -2529,9 +2575,9 @@ def build_parser():
                           "Blocks: pnl,pnl_90d,pnl_24h,tokens,wallet,portfolio,leaderboard,score. "
                           "Only fetches APIs for included blocks → saves CU. "
                           "If omitted, returns full wallet-score (all blocks).")
-    pws.add_argument("--format", choices=["plain", "telegram", "raw-json", "rendered", "compact"], default="rendered",
-                     help="plain = ASCII table · telegram = Unicode paste card · raw-json = structured envelope · "
-                          "rendered = HTML preHtml Hub inject · compact = numeric-only blocks (use with --include).")
+    pws.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered", "compact"], default="ui",
+                     help="ui = HTML renderer payload · plain = ASCII table · telegram = Unicode paste card · "
+                          "json = structured envelope · compact = numeric-only blocks (use with --include).")
     pws.set_defaults(func=cmd_wallet_score)
 
     # --- Skill #11 · Wallet Style (trading-style tagger on Birdeye data) ---
@@ -2547,7 +2593,7 @@ def build_parser():
                       help="Skip /v1/wallet/tx_list (save ~30 CU). No speed subtitle / scaling / gas badges.")
     pwst.add_argument("--skip-first-tx", dest="skip_first_tx", action="store_true", default=False,
                       help="Skip first-funded (wallet age). Reuses permanent CSV cache when present.")
-    pwst.add_argument("--format", choices=["plain", "telegram", "raw-json", "rendered"], default="rendered")
+    pwst.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered"], default="ui")
     pwst.set_defaults(func=cmd_wallet_style)
 
     # Skill #14 — Wallet Analysis (single-wallet deep-dive: profile/assets/trading/performance/risk by intervals)
@@ -2567,7 +2613,7 @@ def build_parser():
                      help="Skip first-funded (wallet age). Reuses permanent CSV cache when present.")
     pwa.add_argument("--skip-portfolio", dest="skip_portfolio", action="store_true", default=False,
                      help="Skip Portfolio V2 net-worth (save 30 CU).")
-    pwa.add_argument("--format", choices=["plain", "telegram", "raw-json", "rendered"], default="rendered")
+    pwa.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered"], default="ui")
     pwa.set_defaults(func=cmd_wallet_analysis)
 
     # Skill #9 — Smart Money Profile (single-wallet behavior analysis + copy-trade verdict)
@@ -2582,18 +2628,18 @@ def build_parser():
                       help="Skip /v1/wallet/tx_list (save ~30 CU). No style/TP-SL inference.")
     psmp.add_argument("--skip-first-tx", dest="skip_first_tx", action="store_true", default=False,
                       help="Skip first-funded (wallet age). Reuses permanent CSV cache when present.")
-    psmp.add_argument("--format", choices=["plain", "telegram", "raw-json", "rendered"], default="rendered")
+    psmp.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered"], default="ui")
     psmp.set_defaults(func=cmd_smart_money_profile)
 
     # Skill #9b — Smart Money Leaderboard (multi-wallet comparison)
     psml = sub.add_parser("smart-money-leaderboard",
                           help="Skill #9b · Smart Money Leaderboard — compare up to 10 wallets, "
-                               "rank by composite score (winrate 40% + pnl 40% + diversity 10% + recency 10%).")
+                               "rank by composite score (winrate 40%% + pnl 40%% + diversity 10%% + recency 10%%).")
     psml.add_argument("--chain", choices=list(CHAINS.keys()), default="sol")
     psml.add_argument("--wallet", action="append", required=True,
                       help="Wallet address (repeat up to 10 times)")
     psml.add_argument("--pnl-method", dest="pnl_method", choices=["wac", "net_cash"], default="wac")
-    psml.add_argument("--format", choices=["plain", "telegram", "raw-json", "rendered"], default="rendered")
+    psml.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered"], default="ui")
     psml.set_defaults(func=cmd_smart_money_leaderboard)
 
     # --- Skill #21 — Kline Pattern (moved from Chain → Chart group) ---
@@ -2606,7 +2652,7 @@ def build_parser():
                      help="Candle resolution (default 15m).")
     pkp.add_argument("--window", default="7d",
                      help="Lookback window e.g. 7d, 3d, 1d (default 7d). Must have >= 8 candles.")
-    pkp.add_argument("--format", choices=["plain", "telegram", "raw-json", "rendered"], default="rendered")
+    pkp.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered"], default="ui")
     pkp.set_defaults(func=cmd_kline_pattern)
 
     # --- Skill #5 — Contract DD (replaces chart; contract due-diligence) ---
@@ -2617,7 +2663,7 @@ def build_parser():
     pcdd.add_argument("--address", required=True, help="Token address (contract)")
     pcdd.add_argument("--skip-kline", dest="skip_kline", action="store_true", default=False,
                       help="Skip kline price-action pillar (save ~25 CU).")
-    pcdd.add_argument("--format", choices=["plain", "telegram", "raw-json", "rendered"], default="rendered")
+    pcdd.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered"], default="ui")
     pcdd.set_defaults(func=cmd_contract_dd)
 
     # --- Skill #22 — Token Trending Score ---
@@ -2631,7 +2677,7 @@ def build_parser():
                      help="Number of 1m OHLCV candles (default 5000 = 100 CU, covers ~83h).")
     pts.add_argument("--nocache", dest="nocache", action="store_true", default=False,
                       help="Bypass 24h CSV cache and fetch fresh data.")
-    pts.add_argument("--format", choices=["plain", "telegram", "raw-json", "rendered"], default="rendered")
+    pts.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered"], default="ui")
     pts.set_defaults(func=cmd_trending_score)
 
     # Skill #23 — Junk Token Prediction (ML classifier)
@@ -4511,7 +4557,7 @@ def cmd_wallet_score(args):
     wallet = args.wallet.strip()
     duration = args.duration
     pnl_method = args.pnl_method
-    fmt = args.format
+    fmt = _canonical_format(getattr(args, "format", None), allow_compact=True)
     nocache = bool(getattr(args, "nocache", False))
     cdir_arg = getattr(args, "cache_dir", None)
     write_cache = bool(getattr(args, "write_cache", True))
@@ -4589,7 +4635,7 @@ def cmd_wallet_score(args):
             sys.stderr.write(f"[wallet-score] cache miss for run_id {from_cache_runid}\n")
             return 3
         payload = json.loads(cp.read_text(encoding="utf-8"))
-        out = payload.get("rendered_" + fmt) or payload.get("out")
+        out = _cache_text_for_format(payload, fmt)
         if not out:
             out = json.dumps(payload, ensure_ascii=False, indent=2)
         print(out)
@@ -4680,7 +4726,7 @@ def cmd_wallet_score(args):
                 print(_ws_format_plain(minimal_payload, wallet, chain_short, duration, cu_from_cache, rid, cached_flag=True))
             elif fmt == "telegram":
                 print(_ws_format_telegram(minimal_payload, wallet, chain_short, duration, cu_from_cache))
-            elif fmt == "raw-json":
+            elif fmt == "json":
                 envelope = {
                     "runId": rid, "cached": True,
                     "cu_used_total": 0, "cu_breakdown": {"replay_cache": 0, "original_api_cu": int(cached_csv.get("cu_used_total") or 0)},
@@ -4692,7 +4738,7 @@ def cmd_wallet_score(args):
                     "cache_note": "Full metrics available when cache TTL expires or --nocache flag passed.",
                 }
                 print(json.dumps(envelope, ensure_ascii=False))
-            elif fmt == "rendered":
+            elif fmt == "ui":
                 payload = {
                     "schemaVersion": 1, "kind": "wallet-alpha-score-v1",
                     "params": {"chain": chain_short, "wallet": wallet, "duration": duration, "pnl_method": pnl_method,
@@ -4710,7 +4756,7 @@ def cmd_wallet_score(args):
                     "cu_used_total": 0,
                     "cu_breakdown": {"replay_cache": 0, "original_api_cu": int(cached_csv.get("cu_used_total") or 0)},
                     "html": _ws_format_rendered_html(minimal_payload, wallet, chain_short, duration, vars(args), cu_from_cache, rid, cached_flag=True),
-                    "format_renderers": ["rendered", "plain", "telegram", "raw-json"],
+                    "format_renderers": ["ui", "plain", "telegram", "json"],
                     "runId": rid, "cached": True, "snapshot_time": int(time.time()),
                     "cache_note": "Full metrics available with --nocache.",
                 }
@@ -4924,7 +4970,7 @@ def cmd_wallet_score(args):
         "cu_used_total": cu_total,
         "cu_breakdown": cu,
         "snapshot_time": int(time.time()),
-        "format_renderers": ["rendered", "plain", "telegram", "raw-json"],
+        "format_renderers": ["ui", "plain", "telegram", "json"],
     }
     out_raw_json = json.dumps(raw_envelope, ensure_ascii=False)
     html_rendered = _ws_format_rendered_html(result, wallet, chain_short, duration, params_snapshot, cu, rid)
@@ -4949,6 +4995,8 @@ def cmd_wallet_score(args):
             "snapshot_time": int(time.time()),
             "rendered_plain": out_plain,
             "rendered_telegram": out_telegram,
+            "rendered_json": out_raw_json,
+            "rendered_ui": out_rendered_json,
             "rendered_raw-json": out_raw_json,
             "rendered_rendered": out_rendered_json,
             "out": out_plain,
@@ -5058,10 +5106,10 @@ def cmd_wallet_score(args):
         sys.stdout.write("```\n")
         sys.stdout.write(out_telegram)
         sys.stdout.write("\n```")
-    elif fmt == "raw-json":
+    elif fmt == "json":
         sys.stdout.write(stdout_prefix_line)
         sys.stdout.write(out_raw_json)
-    elif fmt == "rendered":
+    elif fmt == "ui":
         sys.stdout.write(stdout_prefix_line)
         sys.stdout.write(out_rendered_json)
     sys.stdout.write("\n")
@@ -5438,7 +5486,7 @@ def _fetch_smart_wallets(key: str, chain: str,
         "invariants": {"count": len(gaps), "gaps": gaps},
         "snapshot_time": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "latency_ms": ms,
-        "format_renderers": ["scorecard", "plain", "telegram", "raw-json"],
+        "format_renderers": ["ui", "plain", "telegram", "json"],
     }
     return out
 
@@ -5512,13 +5560,14 @@ def _print_sw_scorecard(d: dict, args_ref=None):
 
 
 def _render_sw_from_cache(payload: dict, fmt: str, run_id: str):
-    if fmt in ("raw-json", "render"):
+    fmt = _canonical_format(fmt)
+    if fmt == "json":
         out = {"runId": run_id, "cached": True, "cu_used_total": payload.get("cu_used_total", 0), "payload": payload}
         print(json.dumps(out, ensure_ascii=False))
         return 0
     if fmt == "telegram":
         _print_sw_telegram(payload)
-    elif fmt == "scorecard":
+    elif fmt == "ui":
         _print_sw_scorecard(payload)
     else:
         _print_sw_plain(payload)
@@ -5526,6 +5575,7 @@ def _render_sw_from_cache(payload: dict, fmt: str, run_id: str):
 
 
 def cmd_smart_wallets(args):
+    fmt = _canonical_format(getattr(args, "format", None))
     cdir = _cache_dir(getattr(args, "cache_dir", None))
     _prune_old_cache(cdir, max_age_hours=24)
     nocache: bool = bool(getattr(args, "nocache", False))
@@ -5541,7 +5591,7 @@ def cmd_smart_wallets(args):
         if not cached or cached.get("kind") != "smart-wallets":
             print(f"[E] Cache run_id not found or invalid: {from_cache}")
             return 3
-        _render_sw_from_cache(cached, args.format, from_cache)
+        _render_sw_from_cache(cached, fmt, from_cache)
         return 0
     key = _load_key()
     if not key:
@@ -5576,13 +5626,13 @@ def cmd_smart_wallets(args):
         rid = _safe_run_id("sm", f"{args.chain}-{args.depth}-p{getattr(args, 'pass_score',70)}-w{getattr(args, 'winrate',40)}", tstamp=int(time.time()))
         fp = _write_cache(cdir, rid, d)
         print(f"#RUN_ID {rid}\t{fp.name}\tcu={d['cu_used_total']}")
-    if args.format == "raw-json":
+    if fmt == "json":
         out = {"runId": rid, "cached": False, "cu_used_total": d["cu_used_total"], "payload": d}
         print(json.dumps(out, ensure_ascii=False))
         return 0
-    if args.format == "telegram":
+    if fmt == "telegram":
         _print_sw_telegram(d)
-    elif args.format == "scorecard":
+    elif fmt == "ui":
         _print_sw_scorecard(d)
     else:
         _print_sw_plain(d)
@@ -5594,6 +5644,7 @@ def cmd_smart_wallets(args):
 # ============================================================
 
 def cmd_history_list(args):
+    fmt = _canonical_format(getattr(args, "format", None), default="plain")
     cdir = _cache_dir(getattr(args, "cache_dir", None))
     _prune_old_cache(cdir, max_age_hours=24)
     items: list[dict] = []
@@ -5632,7 +5683,7 @@ def cmd_history_list(args):
             continue
     items.sort(key=lambda x: x["saved_at_unix"], reverse=True)
     items = items[: max(1, int(getattr(args, "limit", 25) or 25))]
-    if args.format == "raw-json":
+    if fmt == "json":
         print(json.dumps({"items": items}, ensure_ascii=False))
         return 0
     lines = [f"# Recent runs (showing {len(items)})"]
@@ -6411,7 +6462,7 @@ def cmd_wallet_style(args):
     wallet = args.wallet.strip()
     duration = args.duration
     pnl_method = args.pnl_method
-    fmt = args.format
+    fmt = _canonical_format(getattr(args, "format", None))
     nocache = bool(getattr(args, "nocache", False))
     cdir_arg = getattr(args, "cache_dir", None)
     write_cache = bool(getattr(args, "write_cache", True))
@@ -6440,7 +6491,7 @@ def cmd_wallet_style(args):
             sys.stderr.write(f"[wallet-style] cache miss for run_id {from_cache_runid}\n")
             return 3
         payload = json.loads(cp.read_text(encoding="utf-8"))
-        out = payload.get("rendered_" + fmt) or payload.get("out")
+        out = _cache_text_for_format(payload, fmt)
         if not out:
             out = json.dumps(payload, ensure_ascii=False, indent=2)
         print(out)
@@ -6508,7 +6559,7 @@ def cmd_wallet_style(args):
         "cu_used_total": cu_total,
         "cu_breakdown": cu,
         "snapshot_time": int(time.time()),
-        "format_renderers": ["rendered", "plain", "telegram", "raw-json"],
+        "format_renderers": ["ui", "plain", "telegram", "json"],
     }
     out_raw_json = json.dumps(raw_envelope, ensure_ascii=False)
     html_rendered = _wsf_format_rendered_html(result, wallet, chain_short, duration, cu, rid)
@@ -6528,6 +6579,8 @@ def cmd_wallet_style(args):
             "snapshot_time": int(time.time()),
             "rendered_plain": out_plain,
             "rendered_telegram": out_telegram,
+            "rendered_json": out_raw_json,
+            "rendered_ui": out_rendered_json,
             "rendered_raw-json": out_raw_json,
             "rendered_rendered": out_rendered_json,
             "out": out_plain,
@@ -6535,7 +6588,7 @@ def cmd_wallet_style(args):
         _cache_path(cdir, rid).write_text(json.dumps(file_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     stdout_prefix = f"#RUN_ID {rid}\twallet-style\tcu={cu_total}\n"
-    if fmt == "rendered":
+    if fmt == "ui":
         sys.stdout.write(stdout_prefix)
         print(out_rendered_json)
     elif fmt == "plain":
@@ -6811,7 +6864,7 @@ def cmd_wallet_analysis(args):
     chain_full = CHAINS.get(chain_short, chain_short)
     wallet = args.wallet.strip()
     pnl_method = getattr(args, "pnl_method", "wac")
-    fmt = args.format
+    fmt = _canonical_format(getattr(args, "format", None))
     horizon = (getattr(args, "horizon", None) or "normal").strip().lower()
     preset = _WA_HORIZON_PRESETS.get(horizon, _WA_HORIZON_PRESETS["normal"])
     intervals_arg = getattr(args, "intervals", None)
@@ -6865,7 +6918,7 @@ def cmd_wallet_analysis(args):
             sys.stderr.write(f"[wallet-analysis] cache miss for run_id {from_cache_runid}\n")
             return 3
         payload = json.loads(cp.read_text(encoding="utf-8"))
-        out = payload.get("rendered_" + fmt) or payload.get("out")
+        out = _cache_text_for_format(payload, fmt)
         if not out:
             out = json.dumps(payload, ensure_ascii=False, indent=2)
         print(out)
@@ -7253,7 +7306,7 @@ def cmd_wallet_analysis(args):
         "performance": performance, "risk": risk,
         "cu_used_total": cu_total, "cu_breakdown": cu,
         "snapshot_time": int(time.time()),
-        "format_renderers": ["rendered", "plain", "telegram", "raw-json"],
+        "format_renderers": ["ui", "plain", "telegram", "json"],
     }
     out_raw_json = json.dumps(raw_envelope, ensure_ascii=False)
     rendered_payload = dict(raw_envelope)
@@ -7269,13 +7322,14 @@ def cmd_wallet_analysis(args):
             "performance": performance, "risk": risk,
             "snapshot_time": int(time.time()),
             "rendered_plain": out_plain, "rendered_telegram": out_telegram,
+            "rendered_json": out_raw_json, "rendered_ui": out_rendered_json,
             "rendered_raw-json": out_raw_json, "rendered_rendered": out_rendered_json,
             "out": out_plain,
         }
         _cache_path(cdir, rid).write_text(json.dumps(file_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     stdout_prefix = f"#RUN_ID {rid}\twallet-analysis\tcu={cu_total}\n"
-    if fmt == "rendered":
+    if fmt == "ui":
         sys.stdout.write(stdout_prefix); print(out_rendered_json)
     elif fmt == "plain":
         sys.stdout.write(stdout_prefix); print(out_plain)
@@ -7549,7 +7603,7 @@ def cmd_smart_money_profile(args):
     chain_full = CHAINS.get(chain_short, chain_short)
     wallet = args.wallet.strip()
     pnl_method = getattr(args, "pnl_method", "wac")
-    fmt = args.format
+    fmt = _canonical_format(getattr(args, "format", None))
     nocache = bool(getattr(args, "nocache", False))
     cdir_arg = getattr(args, "cache_dir", None)
     write_cache = bool(getattr(args, "write_cache", True))
@@ -7576,7 +7630,7 @@ def cmd_smart_money_profile(args):
             sys.stderr.write(f"[smart-money-profile] cache miss for run_id {from_cache_runid}\n")
             return 3
         payload = json.loads(cp.read_text(encoding="utf-8"))
-        out = payload.get("rendered_" + fmt) or payload.get("out")
+        out = _cache_text_for_format(payload, fmt)
         if not out:
             out = json.dumps(payload, ensure_ascii=False, indent=2)
         print(out)
@@ -7823,7 +7877,7 @@ Realized: ${realized_7d:+,.0f} / ${realized_30d:+,.0f}
         "params": params_snapshot, "profile": profile,
         "cu_used_total": cu_total, "cu_breakdown": cu,
         "snapshot_time": int(time.time()),
-        "format_renderers": ["rendered", "plain", "telegram", "raw-json"],
+        "format_renderers": ["ui", "plain", "telegram", "json"],
     }
     out_raw_json = json.dumps(raw_envelope, ensure_ascii=False)
     rendered_payload = dict(raw_envelope)
@@ -7837,13 +7891,14 @@ Realized: ${realized_7d:+,.0f} / ${realized_30d:+,.0f}
             "params": params_snapshot, "profile": profile,
             "snapshot_time": int(time.time()),
             "rendered_plain": out_plain, "rendered_telegram": out_telegram,
+            "rendered_json": out_raw_json, "rendered_ui": out_rendered_json,
             "rendered_raw-json": out_raw_json, "rendered_rendered": out_rendered_json,
             "out": out_plain,
         }
         _cache_path(cdir, rid).write_text(json.dumps(file_payload, ensure_ascii=False, indent=2), encoding="utf-8")
 
     stdout_prefix = f"#RUN_ID {rid}\tsmart-money-profile\tcu={cu_total}\n"
-    if fmt == "rendered":
+    if fmt == "ui":
         sys.stdout.write(stdout_prefix); print(out_rendered_json)
     elif fmt == "plain":
         sys.stdout.write(stdout_prefix); print(out_plain)
@@ -7912,7 +7967,7 @@ def cmd_smart_money_leaderboard(args):
         expanded.extend(part.strip() for part in w.split(",") if part.strip())
     wallets = expanded[:10]
     pnl_method = getattr(args, "pnl_method", "wac")
-    fmt = args.format
+    fmt = _canonical_format(getattr(args, "format", None))
     nocache = bool(getattr(args, "nocache", False))
 
     api_key = os.environ.get("BIRDEYE_API_KEY")
@@ -8050,7 +8105,7 @@ def cmd_smart_money_leaderboard(args):
         "profile": profile,
         "cu_used_total": cu_total, "cu_breakdown": cu,
         "snapshot_time": int(time.time()),
-        "format_renderers": ["rendered", "plain", "telegram", "raw-json"],
+        "format_renderers": ["ui", "plain", "telegram", "json"],
     }
     out_raw_json = json.dumps(raw_envelope, ensure_ascii=False)
 
@@ -8091,12 +8146,26 @@ def cmd_smart_money_leaderboard(args):
 </div>'''
 
     rendered_payload = dict(raw_envelope)
-    rendered_payload["format"] = "rendered"
-    rendered_payload["rendered_html"] = html_rendered
+    rendered_payload["format"] = "ui"
+    rendered_payload["html"] = html_rendered
     out_rendered_json = json.dumps(rendered_payload, ensure_ascii=False)
 
+    cdir = _cache_dir(getattr(args, "cache_dir", None))
+    if bool(getattr(args, "write_cache", True)):
+        file_payload = {
+            "runId": rid, "kind": "smart-money-leaderboard-v1", "cached": False,
+            "cu_used_total": cu_total, "cu_breakdown": cu,
+            "params": raw_envelope["params"], "profile": profile,
+            "snapshot_time": int(time.time()),
+            "rendered_plain": out_plain, "rendered_telegram": out_telegram,
+            "rendered_json": out_raw_json, "rendered_ui": out_rendered_json,
+            "rendered_raw-json": out_raw_json, "rendered_rendered": out_rendered_json,
+            "out": out_plain,
+        }
+        _cache_path(cdir, rid).write_text(json.dumps(file_payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
     stdout_prefix = f"#RUN_ID {rid}\tsmart-money-leaderboard\tcu={cu_total}\n"
-    if fmt == "rendered":
+    if fmt == "ui":
         sys.stdout.write(stdout_prefix); print(out_rendered_json)
     elif fmt == "plain":
         sys.stdout.write(stdout_prefix); print(out_plain)
@@ -8114,16 +8183,16 @@ def cmd_history_render(args):
         print(f"[E] Cache not found for run_id={args.run_id}")
         return 3
     kind = cached.get("kind")
-    fmt = args.format
+    fmt = _canonical_format(getattr(args, "format", None))
     # Backward-compat: old wallet-score cache files had no top-level `kind`.
     if not kind and (cached.get("rendered_rendered") or cached.get("alpha_score") is not None):
         kind = "wallet-alpha-score-v1"
-    # Format "render" = payload envelope suitable for UI renderers, always JSON
-    if fmt == "render":
+    if fmt == "ui":
         if kind in ("wallet-alpha-score-v1", "wallet-style-v1", "kline-pattern-v1", "contract-dd-v1",
-                    "wallet-analysis-v1", "smart-money-profile-v1", "token-trending-score-v1"):
+                    "wallet-analysis-v1", "smart-money-profile-v1", "token-trending-score-v1",
+                    "smart-money-leaderboard-v1"):
             # Unwrap the pre-rendered JSON string so UI gets html + metrics directly.
-            rendered_raw = cached.get("rendered_rendered") or cached.get("rendered_raw-json") or ""
+            rendered_raw = _cache_text_for_format(cached, "ui") or _cache_text_for_format(cached, "json") or ""
             try:
                 inner = json.loads(rendered_raw) if isinstance(rendered_raw, str) else rendered_raw
             except Exception:
@@ -8147,12 +8216,10 @@ def cmd_history_render(args):
         _render_sw_from_cache(cached, fmt, args.run_id)
         return 0
     if kind in ("wallet-alpha-score-v1", "wallet-style-v1", "kline-pattern-v1", "contract-dd-v1",
-                "wallet-analysis-v1", "smart-money-profile-v1", "token-trending-score-v1"):
+                "wallet-analysis-v1", "smart-money-profile-v1", "token-trending-score-v1",
+                "smart-money-leaderboard-v1"):
         # Wallet score/style/kline/contract-dd/trending-score cache stores each format as a pre-rendered string field.
-        field_map = {"plain": "rendered_plain", "telegram": "rendered_telegram",
-                     "raw-json": "rendered_raw-json", "rendered": "rendered_rendered"}
-        field = field_map.get(fmt)
-        out_text = cached.get(field) if field else None
+        out_text = _cache_text_for_format(cached, fmt)
         if out_text is None:
             # Fallback: if requested fmt not cached, try plain or dump raw.
             out_text = cached.get("rendered_plain") or json.dumps(cached, ensure_ascii=False, indent=2)
@@ -8228,7 +8295,7 @@ def cmd_kline_pattern(args):
     address = args.address
     resolution = args.resolution
     window_s = _kp_window_to_seconds(args.window)
-    fmt = args.format
+    fmt = _canonical_format(getattr(args, "format", None))
     key = _load_key()
     if not key:
         sys.stderr.write("[kline-pattern] missing BIRDEYE_API_KEY.\n")
@@ -8374,6 +8441,8 @@ def cmd_kline_pattern(args):
         "snapshot_time": int(time.time()),
         "rendered_plain": out_plain,
         "rendered_telegram": out_telegram,
+        "rendered_json": out_raw_json,
+        "rendered_ui": out_rendered_json,
         "rendered_raw-json": out_raw_json,
         "rendered_rendered": out_rendered_json,
         "out": out_plain,
@@ -8386,7 +8455,7 @@ def cmd_kline_pattern(args):
     if fmt == "telegram":
         print(out_telegram)
         return 0
-    if fmt == "raw-json":
+    if fmt == "json":
         print(out_raw_json)
         return 0
     print(out_rendered_json)
@@ -8397,7 +8466,7 @@ def cmd_contract_dd(args):
     chain = args.chain
     address = args.address
     skip_kline = args.skip_kline
-    fmt = args.format
+    fmt = _canonical_format(getattr(args, "format", None))
     key = _load_key()
     if not key:
         sys.stderr.write("[contract-dd] missing BIRDEYE_API_KEY.\n")
@@ -8476,7 +8545,7 @@ def cmd_contract_dd(args):
             "ok": False, "error": "symbol empty and no security data — address may be a wallet, not a token",
             "address": address, "chain": chain,
         }
-        if fmt == "raw-json":
+        if fmt == "json":
             print(json.dumps(result, ensure_ascii=False))
         else:
             print(f"[contract-dd] {result['error']}")
@@ -8583,6 +8652,8 @@ def cmd_contract_dd(args):
         "snapshot_time": int(time.time()),
         "rendered_plain": out_plain,
         "rendered_telegram": out_telegram,
+        "rendered_json": out_raw_json,
+        "rendered_ui": out_rendered_json,
         "rendered_raw-json": out_raw_json,
         "rendered_rendered": out_rendered_json,
         "out": out_plain,
@@ -8595,7 +8666,7 @@ def cmd_contract_dd(args):
     if fmt == "telegram":
         print(out_telegram)
         return 0
-    if fmt == "raw-json":
+    if fmt == "json":
         print(out_raw_json)
         return 0
     print(out_rendered_json)
@@ -8882,7 +8953,7 @@ def cmd_trending_score(args):
     chain = args.chain
     address = args.address
     n_candles = max(100, min(5000, int(getattr(args, "candles", 5000) or 5000)))
-    fmt = args.format
+    fmt = _canonical_format(getattr(args, "format", None))
     key = _load_key()
     if not key:
         sys.stderr.write("[token-trending-score] missing BIRDEYE_API_KEY.\n")
@@ -9251,6 +9322,8 @@ def cmd_trending_score(args):
         "snapshot_time": int(time.time()),
         "rendered_plain": out_plain,
         "rendered_telegram": out_telegram,
+        "rendered_json": out_raw_json,
+        "rendered_ui": out_rendered_json,
         "rendered_raw-json": out_raw_json,
         "rendered_rendered": out_rendered_json,
         "out": out_plain,
@@ -9258,7 +9331,7 @@ def cmd_trending_score(args):
     _write_cache(cdir, run_id, file_payload)
     sys.stdout.write(f"#RUN_ID {run_id}\ttoken-trending-score\tcu={cu}\n")
 
-    if fmt == "raw-json":
+    if fmt == "json":
         print(out_raw_json)
         return 0
 
@@ -9302,6 +9375,14 @@ def cmd_junk_predict(args):
         "supervised": "Supervised",
     }.get(mode, mode.title())
     want_holding = mode in {"function", "supervised"} and "holding_distribution" in include_flags
+    web_chain = {
+        "sol": "solana",
+        "eth": "ethereum",
+        "bsc": "bsc",
+        "base": "base",
+        "arc": "arbitrum",
+        "robinhood": "robinhood",
+    }.get(chain, chain)
     key = _load_key()
     if not key:
         sys.stderr.write("[junk-predict] missing BIRDEYE_API_KEY.\n")
@@ -9310,12 +9391,12 @@ def cmd_junk_predict(args):
         sys.stderr.write("[junk-predict] --tokens is required.\n")
         return 2
 
-    # Parse token list: comma, newline, or whitespace separated
+    # Parse token list: comma, newline, tab, or whitespace separated
     addresses: list[str] = []
     for chunk in raw_tokens.replace("\n", ",").split(","):
-        addr = chunk.strip()
-        if addr:
-            addresses.append(addr)
+        for addr in chunk.strip().split():
+            if addr:
+                addresses.append(addr)
     if not addresses:
         sys.stderr.write("[junk-predict] no valid token addresses found.\n")
         return 2
@@ -9325,6 +9406,7 @@ def cmd_junk_predict(args):
     results: list[dict] = []
     overview_calls = 0
     holder_dist_calls = 0
+    search_fallback_calls = 0
 
     HOLDING_TOP1_SUSP_PCT = 99.0
     HOLDING_TOP3_EXCLUDE_PCT = 99.5
@@ -9397,17 +9479,89 @@ def cmd_junk_predict(args):
             "exclude_by_low_conc": bool(dust_parts),
         }
 
+    def _has_meaningful_metrics(row: dict[str, Any]) -> bool:
+        for key_name in ("mcap", "fdv", "liquidity", "price", "vol_24h", "tx_24h", "trader_24h", "holder"):
+            value = _jml._to_float(row.get(key_name))
+            if value is not None and value != 0:
+                return True
+        return False
+
+    def _search_exact_row(session: requests.Session, address: str) -> dict[str, Any] | None:
+        raw, _ms = _be(session, key, chain, "/defi/v3/search", {"keyword": address})
+        data = (raw.get("data") if isinstance(raw, dict) else {}) or {}
+        best: dict[str, Any] | None = None
+        for item in data.get("items") or []:
+            row_type = str(item.get("type") or "").strip().lower()
+            for row in item.get("result") or []:
+                if not isinstance(row, dict):
+                    continue
+                out = dict(row)
+                out["_search_type"] = row_type
+                if str(row.get("address") or "") == address:
+                    return out
+                if best is None and row_type in {"token", "market"}:
+                    best = out
+        return best
+
+    def _fill_from_search(entry: dict[str, Any], row: dict[str, Any]) -> None:
+        row_type = str(row.get("_search_type") or "").strip().lower()
+        entry["address_kind"] = row_type or entry.get("address_kind") or "token"
+        entry["fallback_source"] = "search"
+        entry["name"] = (row.get("name") or entry.get("name") or entry["short_address"]).strip()
+        icon_url = row.get("logo_uri") or row.get("logoURI") or row.get("logo")
+        if icon_url:
+            entry["icon_url"] = icon_url
+        symbol = (row.get("symbol") or "").strip()
+        if symbol:
+            entry["symbol"] = symbol
+        elif row_type == "market" and entry.get("symbol") == entry["address"][:6]:
+            entry["symbol"] = "PAIR"
+        entry["mcap"] = entry.get("mcap") if entry.get("mcap") is not None else _jml._to_float(row.get("market_cap"))
+        entry["fdv"] = entry.get("fdv") if entry.get("fdv") is not None else _jml._to_float(row.get("fdv"))
+        entry["liquidity"] = entry.get("liquidity") if entry.get("liquidity") is not None else _jml._to_float(row.get("liquidity"))
+        entry["vol_24h"] = _jml._to_float(row.get("volume_24h_usd")) if _jml._to_float(row.get("volume_24h_usd")) is not None else entry.get("vol_24h")
+        entry["tx_24h"] = _jml._to_float(row.get("trade_24h")) if _jml._to_float(row.get("trade_24h")) is not None else entry.get("tx_24h")
+        entry["trader_24h"] = _jml._to_float(row.get("unique_wallet_24h")) if _jml._to_float(row.get("unique_wallet_24h")) is not None else entry.get("trader_24h")
+        entry["holder"] = _jml._to_float(row.get("holder")) if _jml._to_float(row.get("holder")) is not None else entry.get("holder")
+        entry["price"] = entry.get("price") if entry.get("price") is not None else _jml._to_float(row.get("price"))
+        entry["price_change_24h_pct"] = _jml._to_float(row.get("price_change_24h_percent")) if _jml._to_float(row.get("price_change_24h_percent")) is not None else entry.get("price_change_24h_pct")
+        entry["vol_change_24h_pct"] = _jml._to_float(row.get("volume_24h_change_percent")) if _jml._to_float(row.get("volume_24h_change_percent")) is not None else entry.get("vol_change_24h_pct")
+        if row_type == "market":
+            entry["base_mint"] = row.get("base_mint")
+            entry["quote_mint"] = row.get("quote_mint")
+            entry["market_name"] = row.get("name")
+            entry["market_source"] = row.get("source")
+
     for addr in addresses:
-        entry: dict[str, Any] = {"address": addr, "symbol": "", "name": "", "error": None}
+        short_addr = f"{addr[:6]}...{addr[-4:]}" if len(addr) > 12 else addr
+        entry: dict[str, Any] = {
+            "address": addr,
+            "short_address": short_addr,
+            "symbol": "",
+            "name": short_addr,
+            "error": None,
+            "icon_url": None,
+            "birdeye_url": f"https://birdeye.so/{web_chain}/token/{addr}",
+            "address_kind": "token",
+        }
         try:
             with requests.Session() as s:
                 ov_raw, _ms = _be(s, key, chain, "/defi/token_overview",
                                   {"address": addr})
             ovd = (ov_raw.get("data") if isinstance(ov_raw, dict) else {}) or {}
+            ext = (ovd.get("extensions") if isinstance(ovd, dict) else {}) or {}
             cu += 21
             overview_calls += 1
-            entry["symbol"] = ovd.get("symbol") or ""
-            entry["name"] = ovd.get("name") or entry["symbol"] or addr[:12]
+            entry["symbol"] = (ovd.get("symbol") or ext.get("symbol") or addr[:6]).strip()
+            entry["name"] = (ovd.get("name") or ext.get("name") or short_addr).strip()
+            entry["icon_url"] = (
+                ovd.get("logoURI")
+                or ovd.get("logo_uri")
+                or ovd.get("logo")
+                or ext.get("logoURI")
+                or ext.get("logo_uri")
+                or ext.get("logo")
+            )
             entry["mcap"] = _jml._to_float(ovd.get("marketCap"))
             entry["fdv"] = _jml._to_float(ovd.get("fdv"))
             entry["liquidity"] = _jml._to_float(ovd.get("liquidity"))
@@ -9427,6 +9581,18 @@ def cmd_junk_predict(args):
             entry["number_markets"] = _jml._to_float(ovd.get("numberMarkets"))
             entry["price_change_24h_pct"] = _jml._to_float(ovd.get("priceChange24hPercent"))
             entry["vol_change_24h_pct"] = _jml._to_float(ovd.get("v24hChangePercent"))
+            if not _has_meaningful_metrics(entry):
+                with requests.Session() as s:
+                    search_row = _search_exact_row(s, addr)
+                if search_row:
+                    _fill_from_search(entry, search_row)
+                    search_fallback_calls += 1
+            if not _has_meaningful_metrics(entry):
+                entry["error"] = "No Birdeye token or market data found for this address"
+                entry["junk_score"] = None
+                entry["is_junk"] = None
+                results.append(entry)
+                continue
             raw_token: dict[str, Any] = {
                 "chain": CHAINS.get(chain, chain),
                 "mcap_usd": entry["mcap"],
@@ -9439,7 +9605,7 @@ def cmd_junk_predict(args):
                 "price_change_24h": entry["price_change_24h_pct"],
                 "vol_30d_usd": None,
             }
-            if want_holding:
+            if want_holding and entry.get("address_kind") == "token":
                 try:
                     with requests.Session() as s:
                         dist = _fetch_holder_distribution(s, addr)
@@ -9476,6 +9642,8 @@ def cmd_junk_predict(args):
     breakdown_cu.append(f"overview=21x{overview_calls}")
     if holder_dist_calls:
         breakdown_cu.append(f"holder_distribution=30x{holder_dist_calls}")
+    if search_fallback_calls:
+        breakdown_cu.append(f"search_fallback=auxx{search_fallback_calls}")
 
     run_id = f"junk_{chain}_{int(time.time())}"
 
@@ -9561,22 +9729,123 @@ def cmd_junk_predict(args):
             return "N/A"
         return _fmt_usd(v)
 
+    def _fmt_depth(v):
+        if v is None:
+            return "null"
+        return f"{float(v):.2f}"
+
+    def _state_label(obj: dict[str, Any], key: str) -> tuple[str, Any]:
+        if key not in obj:
+            return "missing", None
+        return ("null", None) if obj.get(key) is None else ("value", obj.get(key))
+
+    def _fmt_scalar(obj: dict[str, Any], key: str) -> str:
+        state, value = _state_label(obj, key)
+        if state != "value":
+            return state
+        num = _jml._to_float(value)
+        if num is not None and num == 0:
+            return "0"
+        return str(value)
+
+    def _fmt_usd_field(obj: dict[str, Any], key: str) -> str:
+        state, value = _state_label(obj, key)
+        if state != "value":
+            return state
+        num = _jml._to_float(value)
+        if num is None:
+            return str(value)
+        if num == 0:
+            return "0"
+        return _fmt_usd(num)
+
+    def _fmt_int_field(obj: dict[str, Any], key: str) -> str:
+        state, value = _state_label(obj, key)
+        if state != "value":
+            return state
+        num = _jml._to_float(value)
+        if num is None:
+            return str(value)
+        if num == 0:
+            return "0"
+        return f"{int(num):,}"
+
+    def _fmt_pct_field(obj: dict[str, Any], key: str) -> str:
+        state, value = _state_label(obj, key)
+        if state != "value":
+            return state
+        num = _jml._to_float(value)
+        if num is None:
+            return str(value)
+        if num == 0:
+            return "0"
+        return f"{'+' if num >= 0 else ''}{num:.2f}%"
+
+    def _fmt_price_field(obj: dict[str, Any], key: str) -> str:
+        state, value = _state_label(obj, key)
+        if state != "value":
+            return state
+        num = _jml._to_float(value)
+        if num is None:
+            return str(value)
+        if num == 0:
+            return "0"
+        if num >= 1:
+            return f"${num:,.4f}"
+        return f"${num:.8f}"
+
+    def _fmt_conc_field(obj: dict[str, Any], key: str) -> str:
+        state, value = _state_label(obj, key)
+        if state != "value":
+            return state
+        num = _jml._to_float(value)
+        if num is None:
+            return str(value)
+        if num == 0:
+            return "0"
+        return f"{num:.2f}%"
+
     cards_html = ""
     for r in results:
         if r.get("error"):
-            cards_html += (f'<div style="background:#1a1a2e;border:1px solid #ef4444;border-radius:12px;padding:16px;margin-bottom:12px">'
-                           f'<div style="font-weight:700;color:#ef4444">{r["address"][:16]}…</div>'
-                           f'<div style="font-size:12px;color:#94a3b8;margin-top:4px">Error: {r["error"]}</div></div>')
+            logo_html = ""
+            if r.get("icon_url"):
+                logo_html = (
+                    f'<img class="junkIcon" src="{html.escape(r.get("icon_url") or "", quote=True)}" '
+                    f'alt="{html.escape(r.get("symbol") or r.get("short_address") or "token")}"/>'
+                )
+            cards_html += (
+                f'<div class="junkCard junkErrorCard">'
+                f'<div class="junkTop">'
+                f'<div class="junkIdentityWrap">'
+                f'{logo_html}'
+                f'<div class="junkIdentity">'
+                f'<div class="junkNameRow"><span class="junkName">{html.escape(r.get("name") or r.get("short_address") or "Unknown token")}</span><span class="junkSymbol">{html.escape(r.get("symbol") or "")}</span><a class="junkLinkBtn" href="{html.escape(r.get("birdeye_url") or f"https://birdeye.so/{web_chain}/token/{r["address"]}", quote=True)}" target="_blank" rel="noopener noreferrer" title="Open on Birdeye">↗</a></div>'
+                f'<button class="junkAddrBtn" data-copy="{html.escape(r["address"], quote=True)}" data-label="{html.escape(r.get("short_address") or r["address"], quote=True)}" onclick="if(navigator.clipboard)navigator.clipboard.writeText(this.dataset.copy);const el=this;el.textContent=\'✓ copied\';setTimeout(function(){{el.textContent=el.dataset.label;}},900);return false;">{html.escape(r.get("short_address") or r["address"])}</button>'
+                f'</div></div>'
+                f'<div class="junkScoreWrap">'
+                f'<div class="junkScoreLabel">Status</div>'
+                f'<div class="junkScoreValue junkScoreBad">Error</div>'
+                f'</div></div>'
+                f'<div class="junkErrText">Error: {html.escape(r["error"])}</div>'
+                f'</div>'
+            )
             continue
         sym = r.get("symbol") or "?"
         name = r.get("name") or sym
+        logo_html = ""
+        if r.get("icon_url"):
+            logo_html = (
+                f'<img class="junkIcon" src="{html.escape(r.get("icon_url") or "", quote=True)}" '
+                f'alt="{html.escape(sym)}"/>'
+            )
         is_junk = r.get("is_junk", False)
         score = r.get("junk_score", 0) or 0
         score_color = _junk_prob_color(score)
         badge_color = "#ef4444" if is_junk else "#2ecc71"
         badge_text = "🚫 JUNK" if is_junk else "✅ OK"
         metrics = r.get("shared_metrics") or {}
-        liquid_depth = metrics.get("liquid_depth_usd")
+        liquid_depth = metrics.get("liquid_depth_log10")
         val_liq_gap = metrics.get("val_liq_gap")
         vol_per_holder = metrics.get("vol_per_holder_usd")
         top3_pct = metrics.get("top3_pct")
@@ -9586,7 +9855,7 @@ def cmd_junk_predict(args):
             gap_color = "#ef4444" if val_liq_gap > 3 else ("#f0b429" if val_liq_gap > 1.5 else "#2ecc71")
         liq_color = "#8a93a6"
         if isinstance(liquid_depth, (int, float)):
-            liq_color = "#ef4444" if liquid_depth < 1000 else ("#f0b429" if liquid_depth < 100000 else "#22c55e")
+            liq_color = "#ef4444" if liquid_depth < 3 else ("#fb923c" if liquid_depth < 5 else ("#facc15" if liquid_depth < 7 else "#22c55e"))
         vph_color = "#8a93a6"
         if isinstance(vol_per_holder, (int, float)):
             vph_color = "#ef4444" if vol_per_holder < 1 else ("#f0b429" if vol_per_holder < 20 else "#22c55e")
@@ -9599,28 +9868,6 @@ def cmd_junk_predict(args):
             if v is None:
                 return "#8a93a6"
             return "#2ecc71" if v >= 0 else "#ef4444"
-
-        def _fmt_pct(v):
-            if v is None:
-                return "N/A"
-            return f"{'+' if v >= 0 else ''}{v:.2f}%"
-
-        def _fmt_price(v):
-            if v is None:
-                return "N/A"
-            if v >= 1:
-                return f"${v:,.4f}"
-            return f"${v:.8f}"
-
-        def _fmt_int(v):
-            if v is None:
-                return "N/A"
-            return f"{int(v):,}"
-
-        def _fmt_conc(v):
-            if v is None:
-                return "N/A"
-            return f"{v:.2f}%"
 
         status_tags: list[str] = []
         if r.get("healthy_guard"):
@@ -9660,75 +9907,44 @@ def cmd_junk_predict(args):
         if any(r.get(k) is not None for k in ("top1_pct", "top3_pct", "top4_pct", "top5_pct", "top10_pct")):
             holding_html = (
                 f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'
-                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top1: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc(r.get("top1_pct"))}</span></div>'
-                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top3: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc(r.get("top3_pct"))}</span></div>'
-                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top4: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc(r.get("top4_pct"))}</span></div>'
-                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top5: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc(r.get("top5_pct"))}</span></div>'
-                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top10: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc(r.get("top10_pct"))}</span></div>'
+                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top1: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc_field(r, "top1_pct")}</span></div>'
+                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top3: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc_field(r, "top3_pct")}</span></div>'
+                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top4: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc_field(r, "top4_pct")}</span></div>'
+                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top5: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc_field(r, "top5_pct")}</span></div>'
+                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top10: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc_field(r, "top10_pct")}</span></div>'
                 f'</div>'
             )
 
-        cards_html += f'''<div style="background:#171a21;border:1px solid {'#ef4444' if is_junk else '#262b36'};border-radius:12px;padding:16px;margin-bottom:12px">
-  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-    <div>
-      <div style="font-size:18px;font-weight:800;color:#e6e8ef">{html.escape(name)}</div>
-      <div style="font-size:11px;color:#8a93a6;font-family:ui-monospace,monospace">{r["address"]}</div>
+        cards_html += f'''<div class="junkCard" style="border-color:{'#ef4444' if is_junk else '#262b36'}">
+  <div class="junkTop">
+    <div class="junkIdentityWrap">
+      {logo_html}
+      <div class="junkIdentity">
+        <div class="junkNameRow"><span class="junkName">{html.escape(name)}</span><span class="junkSymbol">{html.escape(sym)}</span><a class="junkLinkBtn" href="{html.escape(r.get("birdeye_url") or f"https://birdeye.so/{web_chain}/token/{r["address"]}", quote=True)}" target="_blank" rel="noopener noreferrer" title="Open on Birdeye">↗</a></div>
+        <button class="junkAddrBtn" data-copy="{html.escape(r["address"], quote=True)}" data-label="{html.escape(r.get("short_address") or r["address"], quote=True)}" onclick="if(navigator.clipboard)navigator.clipboard.writeText(this.dataset.copy);const el=this;el.textContent='✓ copied';setTimeout(function(){{el.textContent=el.dataset.label;}},900);return false;">{html.escape(r.get("short_address") or r["address"])}</button>
+      </div>
     </div>
-    <div style="text-align:right">
-      <div style="font-size:10px;color:#8a93a6;letter-spacing:.34px;text-transform:uppercase">Junk Probability</div>
-      <div style="font-size:28px;font-weight:900;color:{score_color}">{score:.1f}<span style="font-size:12px;color:#8a93a6">/100</span></div>
-      <div style="display:inline-block;background:{badge_color};color:#000;font-weight:800;font-size:11px;padding:2px 10px;border-radius:999px;margin-top:4px">{badge_text}</div>
-    </div>
-  </div>
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px">
-    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
-      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">MCap</div>
-      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt(r.get("mcap"))}</div>
-    </div>
-    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
-      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">FDV</div>
-      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt(r.get("fdv"))}</div>
-    </div>
-    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
-      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Liquidity</div>
-      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt(r.get("liquidity"))}</div>
-    </div>
-    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
-      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Vol 24h</div>
-      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt(r.get("vol_24h"))}</div>
-    </div>
-    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
-      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Price</div>
-      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt_price(r.get("price"))}</div>
+    <div class="junkScoreWrap">
+      <div class="junkScoreLabel">Junk Probability</div>
+      <div class="junkScoreValue" style="color:{score_color}">{score:.1f}<span class="junkScoreUnit">/100</span></div>
+      <div class="junkVerdict" style="background:{badge_color};color:#000">{badge_text}</div>
     </div>
   </div>
-  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px">
-    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
-      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Tx 24h</div>
-      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt_int(r.get("tx_24h"))}</div>
-    </div>
-    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
-      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Holders</div>
-      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt_int(r.get("holder"))}</div>
-    </div>
-    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
-      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Markets</div>
-      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt_int(r.get("number_markets"))}</div>
-    </div>
-    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
-      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Price Δ24h</div>
-      <div style="font-size:14px;font-weight:700;color:{_pct_color(r.get('price_change_24h_pct'))};margin-top:2px">{_fmt_pct(r.get("price_change_24h_pct"))}</div>
-    </div>
-    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
-      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Vol Δ24h</div>
-      <div style="font-size:14px;font-weight:700;color:{_pct_color(r.get('vol_change_24h_pct'))};margin-top:2px">{_fmt_pct(r.get("vol_change_24h_pct"))}</div>
-    </div>
+  <div class="junkMiniGrid">
+    <div class="junkMiniStat"><span class="junkMiniLabel">MCap</span><span class="junkMiniValue">{_fmt_usd_field(r, "mcap")}</span></div>
+    <div class="junkMiniStat"><span class="junkMiniLabel">Liquidity</span><span class="junkMiniValue">{_fmt_usd_field(r, "liquidity")}</span></div>
+    <div class="junkMiniStat"><span class="junkMiniLabel">Vol 24h</span><span class="junkMiniValue">{_fmt_usd_field(r, "vol_24h")}</span></div>
+    <div class="junkMiniStat"><span class="junkMiniLabel">Price</span><span class="junkMiniValue">{_fmt_price_field(r, "price")}</span></div>
+    <div class="junkMiniStat"><span class="junkMiniLabel">Holders</span><span class="junkMiniValue">{_fmt_int_field(r, "holder")}</span></div>
+    <div class="junkMiniStat"><span class="junkMiniLabel">Tx 24h</span><span class="junkMiniValue">{_fmt_int_field(r, "tx_24h")}</span></div>
+    <div class="junkMiniStat"><span class="junkMiniLabel">Price Δ24h</span><span class="junkMiniValue" style="color:{_pct_color(_jml._to_float(r.get('price_change_24h_pct')))}">{_fmt_pct_field(r, "price_change_24h_pct")}</span></div>
+    <div class="junkMiniStat"><span class="junkMiniLabel">Vol Δ24h</span><span class="junkMiniValue" style="color:{_pct_color(_jml._to_float(r.get('vol_change_24h_pct')))}">{_fmt_pct_field(r, "vol_change_24h_pct")}</span></div>
   </div>
-  <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">Liquid depth: <span style="color:{liq_color};font-weight:700">{_fmt(liquid_depth)}</span></div>
-    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">Val/Liq gap: <span style="color:{gap_color};font-weight:700">{f"{val_liq_gap:.2f}" if isinstance(val_liq_gap, (int, float)) else "N/A"}</span></div>
-    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">Vol 24h / holder: <span style="color:{vph_color};font-weight:700">{_fmt(vol_per_holder)}</span></div>
-    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">Top3 holding: <span style="color:{top3_color};font-weight:700">{_fmt_conc(top3_pct)}</span></div>
+  <div class="junkFeatureChips">
+    <div class="junkChip">Liquid depth: <span style="color:{liq_color};font-weight:700">{_fmt_depth(liquid_depth)}</span></div>
+    <div class="junkChip">Val/Liq gap: <span style="color:{gap_color};font-weight:700">{f"{val_liq_gap:.2f}" if isinstance(val_liq_gap, (int, float)) else _fmt_scalar(metrics, "val_liq_gap")}</span></div>
+    <div class="junkChip">Vol 24h / holder: <span style="color:{vph_color};font-weight:700">{_fmt_usd_field(metrics, "vol_per_holder_usd")}</span></div>
+    <div class="junkChip">Top3 holding: <span style="color:{top3_color};font-weight:700">{_fmt_conc_field(metrics, "top3_pct")}</span></div>
     {status_html}
   </div>
   {holding_warn_html}
@@ -9744,11 +9960,42 @@ def cmd_junk_predict(args):
                          f'<span style="color:#2ecc71;font-weight:800">✅ {len(results)}/{len(results)} token(s) OK</span></div>')
 
     include_note = " + holder distribution" if want_holding else ""
-    html_out = (f'<div style="max-width:820px;margin:0 auto">'
+    html_out = (f'<div style="max-width:1100px;margin:0 auto">'
+                f'<style>'
+                f'.junkGrid{{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}}'
+                f'.junkCard{{background:#171a21;border:1px solid #262b36;border-radius:12px;padding:12px;min-width:0}}'
+                f'.junkErrorCard{{border-color:#ef4444}}'
+                f'.junkTop{{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:10px}}'
+                f'.junkIdentityWrap{{display:flex;gap:10px;min-width:0;flex:1;align-items:flex-start}}'
+                f'.junkIcon{{width:38px;height:38px;border-radius:10px;background:#0f1115;border:1px solid #262b36;object-fit:cover;display:block;flex:0 0 38px}}'
+                f'.junkIdentity{{min-width:0;display:flex;flex-direction:column;gap:4px}}'
+                f'.junkNameRow{{display:flex;gap:6px;align-items:center;flex-wrap:wrap}}'
+                f'.junkName{{font-size:15px;font-weight:800;color:#e6e8ef;line-height:1.15}}'
+                f'.junkSymbol{{font-size:11px;color:#8a93a6;font-weight:700;background:#0f1115;border:1px solid #262b36;border-radius:999px;padding:2px 7px}}'
+                f'.junkLinkBtn{{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:999px;border:1px solid #262b36;background:#0f1115;color:#8fb8ff;text-decoration:none;font-size:12px;font-weight:800}}'
+                f'.junkLinkBtn:hover{{border-color:#5b9dff;color:#d6e6ff}}'
+                f'.junkAddrBtn{{padding:0;border:0;background:none;color:#94a3b8;font:11px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;text-align:left;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}'
+                f'.junkAddrBtn:hover{{color:#e6e8ef}}'
+                f'.junkScoreWrap{{text-align:right;flex:0 0 auto}}'
+                f'.junkScoreLabel{{font-size:10px;color:#8a93a6;letter-spacing:.34px;text-transform:uppercase}}'
+                f'.junkScoreValue{{font-size:24px;font-weight:900;line-height:1.05}}'
+                f'.junkScoreUnit{{font-size:11px;color:#8a93a6}}'
+                f'.junkScoreBad{{color:#ef4444}}'
+                f'.junkVerdict{{display:inline-block;font-weight:800;font-size:10px;padding:2px 8px;border-radius:999px;margin-top:4px}}'
+                f'.junkMiniGrid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-bottom:10px}}'
+                f'.junkMiniStat{{background:#0f1115;border-radius:8px;padding:7px 8px;min-width:0}}'
+                f'.junkMiniLabel{{display:block;font-size:10px;color:#8a93a6;text-transform:uppercase;margin-bottom:3px}}'
+                f'.junkMiniValue{{display:block;font-size:12px;font-weight:700;color:#e6e8ef;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}}'
+                f'.junkFeatureChips{{display:flex;gap:8px;flex-wrap:wrap}}'
+                f'.junkChip{{font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8}}'
+                f'.junkErrText{{font-size:12px;color:#fca5a5;margin-top:6px}}'
+                f'@media(max-width:900px){{.junkGrid{{grid-template-columns:1fr}}.junkMiniGrid{{grid-template-columns:repeat(2,minmax(0,1fr))}}}}'
+                f'@media(max-width:620px){{.junkTop{{flex-direction:column;align-items:stretch}}.junkScoreWrap{{text-align:left}}}}'
+                f'</style>'
                 f'<div style="font-size:20px;font-weight:800;color:#e6e8ef;margin-bottom:4px">🗑️ Junk Token Prediction</div>'
                 f'<div style="font-size:12px;color:#8a93a6;margin-bottom:14px">{chain.upper()} · {len(results)} token(s) · {mode_label} · {html.escape(model_name)}{include_note}</div>'
                 f'{summary_badge}'
-                f'{cards_html}'
+                f'<div class="junkGrid">{cards_html}</div>'
                 f'<div style="font-size:10px;color:#475569;margin-top:10px">⚡CU cost: {cu} ({html.escape(", ".join(breakdown_cu))})</div>'
                 f'</div>')
 
@@ -9761,7 +10008,10 @@ def cmd_junk_predict(args):
         "cu_used_total": cu, "cu_breakdown": breakdown_cu,
         "params": envelope["params"],
         "snapshot_time": int(time.time()),
+        "rendered_json": json.dumps(envelope, ensure_ascii=False),
+        "rendered_ui": json.dumps(envelope, ensure_ascii=False),
         "rendered_raw-json": json.dumps(envelope, ensure_ascii=False),
+        "rendered_rendered": json.dumps(envelope, ensure_ascii=False),
         "out": json.dumps(envelope, ensure_ascii=False),
     }
     _write_cache(cdir, run_id, file_payload)
@@ -9795,11 +10045,7 @@ def cmd_junk_quick_test(args):
     max_mcap = getattr(args, "max_market_cap", None)
     # Threshold is decided by the model (lr_params.json), not by the user.
     threshold = float(_jml._get_model().get("threshold", 95.0))
-    fmt = str(getattr(args, "format", "ui") or "ui").strip().lower()
-    if fmt in {"render", "rendered", "ui"}:
-        fmt = "ui"
-    elif fmt in {"raw-json", "json"}:
-        fmt = "json"
+    fmt = _canonical_format(getattr(args, "format", None))
     key = _load_key()
     if not key:
         sys.stderr.write("[junk-quick-test] missing BIRDEYE_API_KEY.\n")
@@ -9942,7 +10188,10 @@ def cmd_junk_quick_test(args):
             "runId": run_id, "kind": "junk-quick-test-v1", "cached": False,
             "cu_used_total": cu, "cu_breakdown": breakdown_cu,
             "params": envelope["params"], "snapshot_time": int(time.time()),
+            "rendered_json": json.dumps(envelope, ensure_ascii=False),
+            "rendered_ui": json.dumps(envelope, ensure_ascii=False),
             "rendered_raw-json": json.dumps(envelope, ensure_ascii=False),
+            "rendered_rendered": json.dumps(envelope, ensure_ascii=False),
             "out": json.dumps(envelope, ensure_ascii=False),
         })
         sys.stdout.write(f"#RUN_ID {run_id}\tjunk-quick-test\tcu={cu}\n")
@@ -10016,12 +10265,12 @@ def cmd_junk_quick_test(args):
         badge_text = "🚫 JUNK" if is_junk else "✅ OK"
 
         shared = r.get("shared_metrics") or {}
-        liquid_depth = shared.get("liquid_depth_usd")
+        liquid_depth = shared.get("liquid_depth_log10")
         val_liq_gap = shared.get("val_liq_gap", 0)
         vol_per_holder = shared.get("vol_per_holder_usd")
         top3_pct = shared.get("top3_pct")
         gap_color = "#ef4444" if val_liq_gap > 3 else ("#f0b429" if val_liq_gap > 1.5 else "#2ecc71")
-        liq_color = "#8a93a6" if liquid_depth is None else ("#ef4444" if liquid_depth < 1000 else ("#f0b429" if liquid_depth < 100000 else "#22c55e"))
+        liq_color = "#8a93a6" if liquid_depth is None else ("#ef4444" if liquid_depth < 3 else ("#fb923c" if liquid_depth < 5 else ("#facc15" if liquid_depth < 7 else "#22c55e")))
         vph_color = "#8a93a6" if vol_per_holder is None else ("#ef4444" if vol_per_holder < 1 else ("#f0b429" if vol_per_holder < 20 else "#22c55e"))
         top3_color = "#8a93a6" if top3_pct is None else ("#ef4444" if top3_pct > 95 else ("#f0b429" if top3_pct > 80 else "#22c55e"))
         floor_chip_html = ""
@@ -10083,7 +10332,7 @@ def cmd_junk_quick_test(args):
     </div>
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">Liquid depth: <span style="color:{liq_color};font-weight:700">{_fmt(liquid_depth)}</span></div>
+    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">Liquid depth: <span style="color:{liq_color};font-weight:700">{_fmt_depth(liquid_depth)}</span></div>
     <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">Val/Liq gap: <span style="color:{gap_color};font-weight:700">{val_liq_gap:.2f}</span></div>
     <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">Vol 24h / holder: <span style="color:{vph_color};font-weight:700">{_fmt(vol_per_holder)}</span></div>
     <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">Top3 holding: <span style="color:{top3_color};font-weight:700">{f"{top3_pct:.2f}%" if isinstance(top3_pct, (int, float)) else "N/A"}</span></div>
@@ -10128,7 +10377,10 @@ def cmd_junk_quick_test(args):
         "runId": run_id, "kind": "junk-quick-test-v1", "cached": False,
         "cu_used_total": cu, "cu_breakdown": breakdown_cu,
         "params": envelope["params"], "snapshot_time": int(time.time()),
+        "rendered_json": json.dumps(envelope, ensure_ascii=False),
+        "rendered_ui": json.dumps(envelope, ensure_ascii=False),
         "rendered_raw-json": json.dumps(envelope, ensure_ascii=False),
+        "rendered_rendered": json.dumps(envelope, ensure_ascii=False),
         "out": json.dumps(envelope, ensure_ascii=False),
     }
     _write_cache(cdir, run_id, file_payload)

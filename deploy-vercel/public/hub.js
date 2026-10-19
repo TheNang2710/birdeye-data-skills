@@ -205,7 +205,7 @@ const _SKILL_DOC_MAP = {
   tl:'07-smart-money-token-list.md', tl_v3:'07-smart-money-token-list.md',
   dd:'10-composite-dd-10step.md',
   new_pair:'01-token-overview.md', security:'03-token-security.md', contract_dd:'02-chart-ohlcv-liquidity.md',
-  stc:'04-holder-distribution.md', compare:'02-chart-ohlcv-liquidity.md',
+  compare:'02-chart-ohlcv-liquidity.md',
   sm_tokens:'07-smart-money-token-list.md', sm_wallets:'11-smart-traders-criteria-skill9.md',
   wallet_portfolio:'06-top-traders-profile.md', wallet_style:'06-top-traders-profile.md',
   wallet_money_flow:'06-top-traders-profile.md', wallet_score:'06-top-traders-profile.md',
@@ -877,31 +877,6 @@ SKILL_CTRLS.junk_predict = ()=>`
     <button class="bfmt" data-fmt="raw-json" data-side="junk" title="Raw JSON envelope">JSON</button>
   </div>
 `;
-// ---- Skill #6 · Spam Token Cleaner (stc) · Web scrape 0 holder CU ----
-SKILL_CTRLS.stc = ()=>`
-  <h3>🧹 Skill #6 · Spam Token Cleaner (stc)</h3>
-  <div class="subtle" style="font-size:12px">High-MC dead tokens (MC ≥ $1B, V24h ≤ $50). Holder data from web scrape.</div>
-  <div class="row" style="margin-top:10px"><label>Min Market Cap ($)</label>
-    <input id="stc_min_mc" type="number" value="1000000000" min="1000000" step="1000000" style="font-family:monospace"></div>
-  <div class="row"><label>Max Volume 24h ($)</label>
-    <input id="stc_max_vol" type="number" value="50" min="0" step="10" style="font-family:monospace"></div>
-  <div class="row"><label>Chains (comma, order matters)</label>
-    <input id="stc_chains" type="text" value="solana" style="font-family:monospace;font-size:11.5px"></div>
-  <div class="row"><label>Max tokens total (safe cap demo)</label>
-    <input id="stc_max_tokens" type="number" value="5" min="1" max="500" style="font-family:monospace"></div>
-  <div style="margin-top:6px;padding:8px 10px;border:1px dashed var(--line);border-radius:8px;background:var(--ctrl-bg);font-size:11.5px;color:var(--mute);line-height:1.6">
-    <b>Run recipe:</b> Step1 V3-list sweep (sort=mc desc, cap=100/chain) → Step2 Web scrape holder top1/top10% 0 CU via puppeteer-core + Chrome → Step3 Identity batch top-wallets → Step4 sort by MC desc → TopWalletValue desc → Liq desc → V24h asc.
-  </div>
-  <button class="run" id="stc_run" style="margin-top:14px">▶ Run</button>
-  <div style="display:flex;gap:4px;flex-wrap:wrap;margin-top:10px">
-    <span style="font-size:11px;color:var(--mute);align-self:center;margin-right:4px">Output:</span>
-    <button class="bfmt on" data-fmt="render" data-side="stc" title="Rendered compact table for UI">UI</button>
-    <button class="bfmt" data-fmt="plain" data-side="stc" title="Plain ASCII text (terminal)">Plain</button>
-    <button class="bfmt" data-fmt="telegram" data-side="stc" title="Telegram markdown (triple backticks)">Telegram</button>
-    <button class="bfmt" data-fmt="raw-json" data-side="stc" title="Raw JSON envelope (agent / LLM consumption)">JSON</button>
-  </div>
-`;
-
 // ---- Skill #13 · Wallet Score · Best single-wallet mode 110 CU ----
 SKILL_CTRLS.wallet_score = ()=>`
   <h3>🧠 Skill #13 · Wallet Score</h3>
@@ -1496,30 +1471,6 @@ const SKILL_META_BY_ID = {
       "Give me the composite risk score for <TOKEN_ADDR> with all 3 pillars"
     ],
     apiAgg: "CLI contract-dd pipeline (token_overview + token_security + holder distribution + ohlcv → composite score)"
-  },
-  stc: {
-    installPrompt: `python3 birdeye-screener/scripts/stc.py --min-mc 1000000000 --max-vol 50 --chains solana,robinhood,base,bsc,ethereum --format rendered`,
-    installPresets: [
-      { label: "ALL CHAINS · MC ≥ $1B · V24h ≤ $50 · rendered UI payload",           cu: 0, cmd: `python3 birdeye-screener/scripts/stc.py --min-mc 1000000000 --max-vol 50 --chains solana,robinhood,base,bsc,ethereum --format rendered` },
-      { label: "SOL ONLY · MC ≥ $1B · V24h ≤ $50 · plain terminal",                   cu: 0, cmd: `python3 birdeye-screener/scripts/stc.py --min-mc 1000000000 --max-vol 50 --chains solana --format plain` },
-      { label: "ETH+BASE+BSC · MC ≥ $1B · V24h ≤ $50 · telegram block",              cu: 0, cmd: `python3 birdeye-screener/scripts/stc.py --min-mc 1000000000 --max-vol 50 --chains ethereum,base,bsc --format telegram` },
-      { label: "ROBINHOOD sweep · MC ≥ $1B · V24h ≤ $50 · raw-json agent pipe",      cu: 0, cmd: `python3 birdeye-screener/scripts/stc.py --min-mc 1000000000 --max-vol 50 --chains robinhood --format raw-json` },
-      { label: "LOOSER · MC ≥ $500M · V24h ≤ $500 · plain quick scan",               cu: 0, cmd: `python3 birdeye-screener/scripts/stc.py --min-mc 500000000 --max-vol 500 --chains solana --format plain --nocache` },
-      { label: "0 CU replay from cache prefix · pass --run-id <STORED_RUN_ID>",       cu: 0, cmd: `python3 birdeye-screener/scripts/stc.py --run-id stc_mc1000M_v50_<TS> --format rendered` }
-    ],
-    coreCaps: [
-      "Step 1 V3 list sweep: sort_by=market_cap desc, min_market_cap=$1B server filter, 100 tokens/page, chains solana→robinhood→base→bsc→eth",
-      "Client filter volume_24h_usd <= $50 — then holder/distribution top-10 per token: top10_pct top1_owner amount pct top_wallet_value=pct*MC",
-      "Batch-identity label top wallets: drop non-(Solana|EVM), POST /identity/v1/multiple 100/batch → type/label/category/tags (4 extra cols)",
-      "Final sort: market_cap DESC → top_wallet_value DESC → liquidity DESC → volume_24h_usd ASC. First column = chain. 28 token fields + 9 collector cols."
-    ],
-    agentPrompts: [
-      "Scan all chains for spam tokens with MC >= $1B but 24h volume under $50 — show top wallet concentration",
-      "Show me SOL-only high-MC dead tokens ranked by top-1 wallet value ($)",
-      "Label every top holder of EVM spam tokens (base, bsc, eth) and flag exchange-owned wallets",
-      "Sort the STC list by top_wallet_value DESC — find whales sitting on highest-$ zombie bags"
-    ],
-    apiAgg: "/api/v1/stc/sweep?min_mc=1e9&max_vol=50&chains=solana,robinhood,base,bsc,ethereum"
   },
   key: {
     installPrompt: `# Birdeye key (session/RAM or ~/.birdeye.env) + 4 AI providers (OpenAI / Anthropic / OpenRouter / Gemini)\npython3 birdeye_ui.py --host 127.0.0.1 --port 8765 --reload\n# Then open Skill #28 → paste key → Apply session (RAM, no disk)`,
@@ -2144,10 +2095,6 @@ function renderSkillCtrl(){
       if($('rca_chain'))   $('rca_chain').value   = window.STATE.selection.chain || 'sol';
     }
     // open compare page side-by-side option (0 CU install preset #8 behaviour — helper button)
-  }else if(t==='stc'){
-    // Skill #6 · Spam Token Cleaner — wire format buttons + run
-    wireFormatButtonsInPanel('stc');
-    $('stc_run')?.addEventListener('click', ()=>runCLI('stc'));
   }else if(t==='wallet_score'){
     // Skill #13 · Wallet Score — wire run + format + selection populate
     wireFormatButtonsInPanel('wallet_score');
@@ -2461,7 +2408,6 @@ async function runScript(script, argv, {uiKey=null}={}){
 function cmdText(script, argv){
   const base = script==='birdeye_cli' ? 'python3 birdeye-screener/scripts/birdeye_cli.py'
     : script==='birdeye_screener' ? 'python3 birdeye-screener/scripts/birdeye_screener.py'
-    : script==='stc' ? 'python3 birdeye-screener/scripts/stc.py'
     : 'python3 birdeye-screener/scripts/birdeye_trending_simple.py';
   return base + ' ' + argv.map(a=>/^[A-Za-z0-9_=.-]+$/.test(a)?a:JSON.stringify(a)).join(' ');
 }
@@ -3722,8 +3668,8 @@ function handleNextAction(act, o){
       // Show ready banner so user knows prefill happened
       setTimeout(()=>{ const out=$('out'); if(out && !out.querySelector('.card')) out.innerHTML=`<div class="render"><div class="good">✅ Prefilled — ${o.sym||'token'} · ${addrCut(o.addr||'',4,4)} · click ▶ Run to execute (71 CU).</div></div>`; }, 60);
       break;
-    case 'holders': case 'stc': case 'sm_token': case 'ohlcv': case 'deepsec':
-      window.STATE.skill = {holders:'stc', stc:'stc', sm_token:'sm_flow_token', ohlcv:'chart', deepsec:'security'}[act];
+    case 'sm_token': case 'ohlcv': case 'deepsec':
+      window.STATE.skill = {sm_token:'sm_flow_token', ohlcv:'chart', deepsec:'security'}[act];
       renderCatalog(); renderSkillCtrl();
       break;
     case 'same_plat':
@@ -3833,24 +3779,6 @@ async function runCLI(side, {formatOverride=null}={}){
     if(!showHolders) argv.push('--no-rug-show-holders');
     payloadKey = (fmtChosen==='ui' ? 'ui-rca' : fmtChosen);
     kindHint = 'rugcheck-audit';
-  }else if(side==='stc'){
-    // Skill #6 · Spam Token Cleaner (stc) — script="stc" not birdeye_cli.
-    script = 'stc';
-    fmtChosen = canonFormat(formatOverride || selectedFmt('stc'));
-    fmtUse = cliFormatFor('stc', fmtChosen);
-    const minMc = Number($('stc_min_mc')?.value || 1e9);
-    const maxVol = Number($('stc_max_vol')?.value || 50);
-    const chains = ($('stc_chains')?.value || 'solana').trim();
-    const maxTokens = Math.max(1, Number($('stc_max_tokens')?.value || 5));
-    argv = [
-      '--min-mc', String(Math.round(minMc)),
-      '--max-vol', String(maxVol),
-      '--chains', chains,
-      '--max-tokens', String(Math.round(maxTokens)),
-      '--format', fmtUse
-    ];
-    payloadKey = (fmtChosen==='ui') ? 'ui-stc' : fmtChosen;
-    kindHint = 'stc';
   }else if(side==='wallet_score'){
     // Skill #13 Wallet Score — birdeye_cli wallet-score subcommand
     // --nocache ensures clicking ▶ Run ALWAYS fetches fresh API data
@@ -4023,25 +3951,6 @@ async function runCLI(side, {formatOverride=null}={}){
           `<div style="margin-top:10px"><div class="section-title" style="margin-bottom:4px">CLI stdout</div><pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre></div>`;
       }else{
         bodyBlock = `<div class="render"><div class="warn">⚠ Unable to parse RugCheck payload → fallback render as DD scorecard (showing raw stdout)</div></div>${makeDDRender(stdoutClean)}`;
-      }
-    }else if(payloadKey==='ui-stc'){
-      // Skill #6 · Spam Token Cleaner rendered output.
-      // stc.py --format rendered may return: (a) JSON envelope with rows + html, (b) raw HTML string <div class=render-stc>, or (c) plain text.
-      let parsed = null;
-      try{ if(stdoutClean && typeof stdoutClean === 'string' && /^\s*\{/.test(stdoutClean)) parsed = JSON.parse(stdoutClean); }catch(_){}
-      const rows = (parsed && (parsed.rows || (parsed.payload && parsed.payload.rows))) || null;
-      const preHtml = (parsed && (parsed.html || (parsed.payload && parsed.payload.html))) || null;
-      if(preHtml && typeof preHtml === 'string' && preHtml.trim().length){
-        bodyBlock = preHtml +
-          `<div style="margin-top:10px"><div class="section-title" style="margin-bottom:4px">CLI stdout</div><pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre></div>`;
-      }else if(Array.isArray(rows) && rows.length){
-        const cols = Object.keys(rows[0] || {}).slice(0, 16);
-        const header = `<tr>${cols.map(c=>`<th style="position:sticky;top:0;background:var(--card-bg);z-index:1;padding:6px 8px;text-align:left;border-bottom:1px solid var(--line);font-size:11px;white-space:nowrap">${htmlEscape(c.toUpperCase())}</th>`).join('')}</tr>`;
-        const rhtml = rows.map((r,i)=>`<tr style="${i%2?'background:rgba(255,255,255,.02)':''}">${cols.map(c=>{const v=r[c]; const s=v==null||v===undefined?'—':(typeof v==='number'?(Number.isInteger(v)?String(v):Number(v).toFixed(c.toLowerCase().includes('pct')?2:4)):String(v)); return `<td style="padding:4px 8px;font-size:11.5px;white-space:nowrap;font-family:${/^[0-9.\-%$,\s]+$/.test(s)?'monospace':'inherit'}">${htmlEscape(s)}</td>`;}).join('')}</tr>`).join('');
-        bodyBlock = `<div class="render" style="margin-top:10px"><div class="section-title" style="margin-bottom:6px">🧹 STC Results · ${rows.length} rows · sort = MC desc → TopWalletValue desc → Liq desc → V24h asc</div><div style="overflow-x:auto;max-height:60vh;border:1px solid var(--line);border-radius:10px"><table style="border-collapse:collapse;width:100%">${header}${rhtml}</table></div></div>` +
-          `<div style="margin-top:10px"><div class="section-title" style="margin-bottom:4px">CLI stdout</div><pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre></div>`;
-      }else{
-        bodyBlock = `<pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre>`;
       }
     }else if(payloadKey==='ui-wallet-score'){
       // Skill #13 · Wallet Score rendered output. JSON envelope {html, metrics, components, step_checks, alpha_score, tier, wallet_info, cu_breakdown}.

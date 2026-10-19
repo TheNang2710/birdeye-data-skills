@@ -56,7 +56,9 @@
   .sc[data-grp="list"] .gbad{background:rgba(245,158,11,.12);color:#ffb94d;border-color:rgba(245,158,11,.3)}
   .sc[data-grp="token"] .gbad{background:rgba(91,157,255,.12);color:#7ab0ff;border-color:rgba(91,157,255,.3)}
   .sc[data-grp="wallet"] .gbad{background:rgba(124,91,255,.12);color:#a58bff;border-color:rgba(124,91,255,.3)}
-  .betabadge{font-size:8.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:#ffb94d;background:rgba(245,158,11,.13);border:1px solid rgba(245,158,11,.35);border-radius:4px;padding:0 4px;margin-left:5px;vertical-align:middle;white-space:nowrap}
+  .betabadge,.devbadge{font-size:8.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:4px;padding:0 4px;margin-left:5px;vertical-align:middle;white-space:nowrap}
+  .betabadge{color:#ffb94d;background:rgba(245,158,11,.13);border:1px solid rgba(245,158,11,.35)}
+  .devbadge{color:#8cc8ff;background:rgba(91,157,255,.13);border:1px solid rgba(91,157,255,.35)}
   .empty{padding:12px 4px;font-size:11.5px;color:var(--mute)}
   section.out{padding:12px 16px 18px;overflow:auto;height:100%;min-width:0}
   .form{background:linear-gradient(180deg,#141a26,#111621);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:0 18px 44px rgba(0,0,0,.18)}
@@ -129,6 +131,10 @@
   .fmt-tab:hover{color:var(--text)}
   .fmt-tab.active{background:#080a0f;color:var(--accent);border-color:var(--accent)}
   .fmt-tab .cu-note{font-size:9.5px;color:var(--good);margin-left:4px;font-weight:500}
+  .out-actions{display:none;align-items:center;justify-content:flex-end;gap:8px;margin:-2px 0 8px}
+  .out-actions.show{display:flex}
+  .out-actions .copybtn{background:var(--panel2);border:1px solid var(--line);border-radius:7px;color:var(--mute);font-size:11px;padding:5px 10px;cursor:pointer}
+  .out-actions .copybtn:hover{color:var(--accent);border-color:var(--accent)}
   .copy-addr:hover{color:var(--accent)!important}
   .addr-ext{margin-left:3px;color:var(--accent);text-decoration:none;font-size:11px;opacity:.75;cursor:pointer}
   .addr-ext:hover{opacity:1}
@@ -232,6 +238,7 @@
       <button class="fmt-tab" data-fmt="json">{ } JSON<span class="cu-note">0 CU</span></button>
       <button class="fmt-tab" data-fmt="telegram">✈️ Telegram<span class="cu-note">0 CU</span></button>
     </div>
+    <div class="out-actions" id="outputActions"></div>
     <div id="outputArea"></div>
   </section>
   <aside class="hist" id="histPanel">
@@ -254,17 +261,10 @@ function optLabel(v){
 }
 function cliFormatForSkill(skill, fmt){
   const f = String(fmt || "ui").toLowerCase();
-  if(skill.id === "junk" || skill.id === "junk_qt" || skill.id === "dd"){
-    if(["ui","json","telegram","plain"].includes(f)) return f;
-    if(f === "raw-json") return "json";
-    if(f === "render" || f === "rendered") return "ui";
-    return f || "ui";
-  }
-  if(f === "json") return "raw-json";
-  if(f === "plain" || f === "telegram") return f;
-  if(skill.id === "rugcheck") return "raw-json";
-  if(skill.type === "list") return "raw-json";
-  return "rendered";
+  if(["ui","json","telegram","plain"].includes(f)) return f;
+  if(f === "raw-json") return "json";
+  if(f === "render" || f === "rendered" || f === "scorecard" || f === "rugcheck" || f === "compact") return "ui";
+  return f || "ui";
 }
 function canonFormatName(fmt){
   const f = String(fmt || "").toLowerCase();
@@ -312,7 +312,7 @@ const SKILLS = [
   ]},
   {id:"junk", icon:"🧟", name:"Junk Token Predict", desc:"Token junk score with Unsupervised, Function, or Supervised mode", cmd:"junk-predict", type:"token", cu:"21/token", inputs:[
     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
-    {k:"tokens",label:"Token addresses (comma or newline separated)",type:"textarea",def:""},
+    {k:"tokens",label:"Token addresses (space, comma, or newline separated)",type:"textarea",def:""},
     {k:"model",label:"Model",type:"select",opts:["unsupervised","function","supervised"],def:"function"},
     {k:"include_holding_distribution",label:"Include holding distribution (+30 CU/token)",type:"checkbox",def:false},
   ]},
@@ -353,14 +353,14 @@ const SKILLS = [
     {k:"skip_first_tx",label:"Skip first-tx",type:"checkbox",def:false},
     {k:"skip_portfolio",label:"Skip portfolio",type:"checkbox",def:false},
   ]},
-  {id:"sm_profile", icon:"🎯", name:"Smart Money Profile", desc:"Single wallet: style, TP/SL, copy-trade verdict", cmd:"smart-money-profile", type:"wallet", cu:"~120", inputs:[
+  {id:"sm_profile", icon:"🎯", name:"Smart Money Profile", desc:"Single wallet: style, TP/SL, copy-trade verdict", cmd:"smart-money-profile", type:"wallet", cu:"~120", dev:true, inputs:[
     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
     {k:"wallet",label:"Wallet",type:"text",def:"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"},
     {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
     {k:"skip_tx_list",label:"Skip tx-list",type:"checkbox",def:false},
     {k:"skip_first_tx",label:"Skip first-tx",type:"checkbox",def:false},
   ]},
-  {id:"sm_leaderboard", icon:"🏆", name:"SM Leaderboard", desc:"Rank up to 10 wallets by composite score", cmd:"smart-money-leaderboard", type:"wallet", cu:"90/w", inputs:[
+  {id:"sm_leaderboard", icon:"🏆", name:"SM Leaderboard", desc:"Rank up to 10 wallets by composite score", cmd:"smart-money-leaderboard", type:"wallet", cu:"90/w", dev:true, inputs:[
     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
     {k:"wallet",label:"Wallets (comma-sep)",type:"text",def:"A8yCtfXB2VfyVxzj8gy6F2vSxiPkPcz8yquiusbT9yfW,9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"},
     {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
@@ -609,7 +609,7 @@ function renderHistory(){
     const cu = r.cu ? `<span class="hcu">⚡${r.cu} CU</span>` : "";
     const bad = r.exit ? `<span class="hbad">exit ${r.exit}</span>` : "";
     return `<div class="hitem" data-i="${i}" title="Click to replay (0 CU)">`
-      + `<div class="hk">${esc(r.icon||"")} ${esc(r.name||r.skillId||"run")}${r.beta?' <span class="betabadge">beta</span>':''}</div>`
+      + `<div class="hk">${esc(r.icon||"")} ${esc(r.name||r.skillId||"run")}${r.beta?' <span class="betabadge">beta</span>':''}${r.dev?' <span class="devbadge">dev</span>':''}</div>`
       + `<div class="hd"><span>${fmtTime(r.ts)}</span>${cu}${bad}</div></div>`;
   }).join("");
   el.querySelectorAll(".hitem").forEach(c=>c.onclick=()=>replayRun(parseInt(c.dataset.i,10)));
@@ -661,10 +661,11 @@ function renderSkillList(){
   const cards = list.map(s=>{
     const g = GROUPS[s.type] || {label:"?", badge:"?"};
     const beta = s.beta ? '<span class="betabadge">beta</span>' : "";
+    const dev = s.dev ? '<span class="devbadge">dev</span>' : "";
     return `<div class="sc ${s.id===state.skill.id?'active':''}" data-id="${s.id}" data-grp="${s.type}" title="${esc(s.desc)}">`
       + `<div class="gbad" title="${esc(g.label)}">${esc(g.badge)}</div>`
       + `<div class="ic">${s.icon}</div><div class="body">`
-      + `<div class="nm">${esc(s.name)}${beta}</div><div class="ds">${esc(s.desc)}</div>`
+      + `<div class="nm">${esc(s.name)}${beta}${dev}</div><div class="ds">${esc(s.desc)}</div>`
       + `</div></div>`;
   }).join("");
   el.innerHTML = `<div class="grpbar"><span class="lbl">Group</span>${chips}</div>`
@@ -715,7 +716,7 @@ function renderSideChecks(checks){
   }</div></div>`;
 }
 function renderHeader(s){
-  return `<div class="hd"><div class="ttgrp"><span class="ttl">${s.icon} ${esc(s.name)}${s.beta?'<span class="betabadge">beta</span>':''}</span><div class="formSub">${esc(s.desc)}</div></div><div class="hdActions"><span class="cmdbadge" id="cmdBadge" title="Click to copy command">📋 ${esc(s.cmd||'stc')}</span><button class="flowBtn" id="flowBtn" title="Workflow overview — flow + steps">🧭 Flow</button></div></div>`;
+  return `<div class="hd"><div class="ttgrp"><span class="ttl">${s.icon} ${esc(s.name)}${s.beta?'<span class="betabadge">beta</span>':''}${s.dev?'<span class="devbadge">dev</span>':''}</span><div class="formSub">${esc(s.desc)}</div></div><div class="hdActions"><span class="cmdbadge" id="cmdBadge" title="Click to copy command">📋 ${esc(s.cmd||s.script||'')}</span><button class="flowBtn" id="flowBtn" title="Workflow overview — flow + steps">🧭 Flow</button></div></div>`;
 }
 function renderFooter(s){
   return `<div class="form-foot"><button class="run" id="runBtn">▶ Run</button><span class="runhint">Enter to run</span><span class="cu-badge">${esc(s.cu)} CU</span></div>`;
@@ -944,7 +945,7 @@ function showResult(j){
 
   const f = state.last.formats || {};
   $("fmtTabs").querySelector('[data-fmt="telegram"]').style.display = f.telegram ? "" : "none";
-  $("fmtTabs").querySelector('[data-fmt="json"]').style.display = f.json ? "" : "none";
+  $("fmtTabs").querySelector('[data-fmt="json"]').style.display = (f.json || String(state.last.text || "").trim().startsWith("{")) ? "" : "none";
   $("fmtTabs").querySelector('[data-fmt="plain"]').style.display = f.plain ? "" : "none";
   $("fmtTabs").style.display = "flex";
   setFmt("ui");
@@ -957,9 +958,14 @@ function setFmt(fmt){
 }
 function paintFormat(fmt){
   const area = $("outputArea");
+  const actions = $("outputActions");
   const j = state.last;
-  if(!j){ area.innerHTML = ""; return; }
+  if(!j){ area.innerHTML = ""; if(actions){ actions.className = "out-actions"; actions.innerHTML = ""; } return; }
   const f = j.formats || {};
+  if(actions){
+    actions.className = "out-actions";
+    actions.innerHTML = "";
+  }
   if(fmt === "ui"){
     if(f.ui){
       area.innerHTML = `<div class="rendered-box">${f.ui}</div>`;
@@ -973,6 +979,11 @@ function paintFormat(fmt){
     let out = f.json || "";
     try{ out = JSON.stringify(JSON.parse(out), null, 2); }catch(e){}
     area.innerHTML = `<pre class="out_body">${esc(out || "No JSON output.")}</pre>`;
+    if(actions && out){
+      actions.className = "out-actions show";
+      actions.innerHTML = `<button class="copybtn" id="copyJsonBtn">📋 Copy all output JSON</button>`;
+      const b = $("copyJsonBtn"); if(b) b.onclick = ()=>copyText(out);
+    }
   } else if(fmt === "telegram"){
     area.innerHTML = `<pre class="out_body">${esc(f.telegram || "Telegram format not available for this skill.")}</pre>`;
   }
