@@ -32,8 +32,9 @@ loaded at runtime through the `modules` package shim
 so the CLI's `from modules import junk_ml` imports keep working unchanged.
 
 `vercel.json` ships the folder with `includeFiles: "api/**"`, and `/api/meta`
-reports `ml_ready` so a deploy that dropped it is obvious. Keep this repo
-**private** — `api/_ml/` is the model, not something to publish.
+reports `ml_ready` so a deploy that dropped it is obvious. Keeping the model
+files in one folder (rather than inside the bundled CLI) makes them easy to
+audit and swap.
 
 ## API key behaviour
 
@@ -62,8 +63,8 @@ No dependencies beyond the stdlib plus `requests` (already needed by the CLI).
 
 ## Deploy to Vercel
 
-`deploy-vercel/` is a self-contained project and its own git repo. Pick one of
-the two ways below.
+`deploy-vercel/` is a self-contained sub-project that lives inside the workspace
+repo (`birdeye-data-skills`). Pick one of the two ways below.
 
 ### Option A — Vercel CLI (fastest)
 
@@ -83,20 +84,30 @@ The CLI uploads the folder as-is, so `api/_ml/` goes up too (the ML skills need 
 > `framework` to `null` (= preset **Other**) is what makes each `api/*.py`
 > deploy as its own function and `public/` serve as the static output dir.
 
-### Option B — Git + dashboard
+### Option B — Git + dashboard (manual)
 
-1. Push this repo to a host (keep it **private** — `api/_ml/` contains the model):
+Prerequisite: the workspace is pushed to `TheNang2710/birdeye-data-skills`
+(branch `main`).
 
-   ```bash
-   git remote add origin <your-private-repo-url>
-   git push -u origin main
-   ```
+1. Open <https://vercel.com/new> and sign in **with GitHub** (account
+   `TheNang2710`).
+2. **Import Git Repository** → pick `birdeye-data-skills`. If it is not listed,
+   click *Adjust GitHub App Permissions* and grant access to the repo.
+3. In **Configure Project** set:
+   - **Project Name**: `skills` (or any name)
+   - **Framework Preset**: **Other**
+   - **Root Directory**: click **Edit** → choose **`deploy-vercel`**
+     ← *required*: the repo is a monorepo, so `deploy-vercel/` is where
+     `api/`, `public/` and `vercel.json` actually live
+   - **Build Command** / **Output Directory** / **Install Command**: leave empty
+     (Vercel installs `requirements.txt` and serves `public/` automatically)
+4. **Environment Variables**: leave empty for a BYO-key public console.
+   Set `BIRDEYE_ALLOW_ENV_KEY=1` **and** `BIRDEYE_API_KEY=<key>` only if you want
+   the server's own key used on a private deployment.
+5. Click **Deploy**. Every later push to `main` auto-deploys.
 
-2. Vercel dashboard → **Add New… → Project → Import** the repo.
-3. **Root Directory**: leave it as the repo root. Only set it to `deploy-vercel`
-   if you nest this folder inside a larger monorepo.
-4. **Framework Preset**: *Other*; leave Build/Output settings empty.
-5. **Deploy**. Every later push to `main` auto-deploys.
+> Skipping step 3's Root Directory makes Vercel build from the repo root, where
+> there is no `api/` — the deploy then produces no functions and `/api/*` 404s.
 
 ### Verify after deploy
 

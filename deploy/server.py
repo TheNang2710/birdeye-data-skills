@@ -34,7 +34,7 @@ ASSETS = REPO / "assets"
 DEFAULT_CLI = REPO / "birdeye-screener" / "scripts" / "birdeye_cli.py"
 PY = sys.executable
 
-# Import the lean test console HTML (served at /test)
+# Import the shared console HTML (served at / and /test)
 try:
     TEST_UI_HTML = (ASSETS / "test.html").read_text(encoding="utf-8")
 except Exception as _e:
@@ -155,8 +155,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         p = parsed.path
 
-        # ── Hub static assets (served from assets/) ──
-        if p in ("/", "/home.html"):
+        # ── Shared console UI + legacy hub assets ──
+        if p in ("/", "/index.html", "/test", "/test/"):
+            try:
+                self._send_html(200, (ASSETS / "test.html").read_bytes())
+            except Exception:
+                self._send_html(200, TEST_UI_HTML.encode("utf-8"))
+            return
+        if p == "/home.html":
             self._serve_asset("home.html")
             return
         if p == "/detail.html":
@@ -167,12 +173,6 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if p == "/hub.css":
             self._serve_asset("hub.css", "text/css; charset=utf-8")
-            return
-        if p in ("/test", "/test/"):
-            try:
-                self._send_html(200, (ASSETS / "test.html").read_bytes())
-            except Exception:
-                self._send_html(200, TEST_UI_HTML.encode("utf-8"))
             return
         if p.startswith("/docs/") or p.startswith("/API/"):
             safe = p.lstrip("/").replace("..", "_")
