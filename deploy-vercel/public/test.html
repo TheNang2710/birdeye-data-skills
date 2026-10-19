@@ -974,7 +974,13 @@ function paintFormat(fmt){
       area.innerHTML = `<pre class="out_body ${j.exit ? 'err' : ''}">${esc(fallback)}</pre>`;
     }
   } else if(fmt === "plain"){
-    area.innerHTML = `<pre class="out_body">${esc(f.plain || textFallback(j) || "No plain output.")}</pre>`;
+    const out = f.plain || textFallback(j) || "No plain output.";
+    area.innerHTML = `<pre class="out_body">${esc(out)}</pre>`;
+    if(actions && out){
+      actions.className = "out-actions show";
+      actions.innerHTML = `<button class="copybtn" id="copyPlainBtn">📋 Copy all plain output</button>`;
+      const b = $("copyPlainBtn"); if(b) b.onclick = ()=>copyText(out);
+    }
   } else if(fmt === "json"){
     let out = f.json || "";
     try{ out = JSON.stringify(JSON.parse(out), null, 2); }catch(e){}
@@ -985,7 +991,13 @@ function paintFormat(fmt){
       const b = $("copyJsonBtn"); if(b) b.onclick = ()=>copyText(out);
     }
   } else if(fmt === "telegram"){
-    area.innerHTML = `<pre class="out_body">${esc(f.telegram || "Telegram format not available for this skill.")}</pre>`;
+    const out = f.telegram || "Telegram format not available for this skill.";
+    area.innerHTML = `<pre class="out_body">${esc(out)}</pre>`;
+    if(actions && out && f.telegram){
+      actions.className = "out-actions show";
+      actions.innerHTML = `<button class="copybtn" id="copyTelegramBtn">📋 Copy all telegram output</button>`;
+      const b = $("copyTelegramBtn"); if(b) b.onclick = ()=>copyText(out);
+    }
   }
   if(j.stderr) console.log("stderr:", j.stderr);
   decorateAddrs();

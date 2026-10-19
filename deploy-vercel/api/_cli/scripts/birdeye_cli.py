@@ -8217,8 +8217,10 @@ def cmd_history_render(args):
         return 0
     if kind in ("wallet-alpha-score-v1", "wallet-style-v1", "kline-pattern-v1", "contract-dd-v1",
                 "wallet-analysis-v1", "smart-money-profile-v1", "token-trending-score-v1",
-                "smart-money-leaderboard-v1"):
-        # Wallet score/style/kline/contract-dd/trending-score cache stores each format as a pre-rendered string field.
+                "smart-money-leaderboard-v1", "junk-predict-v1", "junk-quick-test-v1") or any(
+                    cached.get(k) is not None for k in ("rendered_plain", "rendered_telegram", "rendered_json", "rendered_ui")
+                ):
+        # Rendered-cache skills store each format as a pre-rendered string field.
         out_text = _cache_text_for_format(cached, fmt)
         if out_text is None:
             # Fallback: if requested fmt not cached, try plain or dump raw.
@@ -9647,52 +9649,59 @@ def cmd_junk_predict(args):
 
     run_id = f"junk_{chain}_{int(time.time())}"
 
-    # ── Format: plain ──
+    plain_lines = [
+        f"Skill #23 · Junk Token Prediction — {chain.upper()}",
+        f"Mode: {mode_label} · {model_name}",
+    ]
+    if want_holding:
+        plain_lines.append("Include: holding_distribution")
+    plain_lines.append(f"{'#':>3} {'Symbol':<12} {'JunkProb':>8} {'Verdict':>8} {'MCap':>12} {'Liq':>12} {'Vol24h':>12} {'Tx24h':>8} {'Trader':>8}")
+    plain_lines.append("-" * 95)
+    for i, r in enumerate(results, 1):
+        if r.get("error"):
+            plain_lines.append(f"{i:>3} {r['address'][:12]:<12} ERROR: {r['error']}")
+            continue
+        sym = (r.get("symbol") or "?")[:12]
+        sc = f"{r['junk_score']:.1f}" if r["junk_score"] is not None else "N/A"
+        junk = "JUNK" if r.get("is_junk") else "OK"
+        mc = _fmt_usd(r.get("mcap"))
+        liq = _fmt_usd(r.get("liquidity"))
+        vol = _fmt_usd(r.get("vol_24h"))
+        tx = f"{int(r['tx_24h']):,}" if r.get("tx_24h") is not None else "N/A"
+        tr = f"{int(r['trader_24h']):,}" if r.get("trader_24h") is not None else "N/A"
+        plain_lines.append(f"{i:>3} {sym:<12} {sc:>8} {junk:>8} {mc:>12} {liq:>12} {vol:>12} {tx:>8} {tr:>8}")
+    plain_lines.append("")
+    plain_lines.append(f"⚡CU: {cu} ({', '.join(breakdown_cu)})")
+    out_plain = "\n".join(plain_lines)
+
+    tg_lines = [
+        "🗑️ Junk Token Prediction",
+        f"Chain: {chain.upper()} · Mode: {mode_label}",
+        f"Model: {model_name}",
+    ]
+    if want_holding:
+        tg_lines.append("Include: holding_distribution")
+    for r in results:
+        if r.get("error"):
+            tg_lines.append(f"• {r['address'][:16]}… → ERROR: {r['error']}")
+            continue
+        verdict = "🚫 JUNK" if r.get("is_junk") else "✅ OK"
+        tg_lines.append(
+            f"• {r.get('name') or r.get('symbol') or r['address'][:12]} "
+            f"({r.get('symbol') or '?'})\n"
+            f"  Junk Probability: {r.get('junk_score', 0):.1f}/100 · {verdict}"
+        )
+        alerts = (r.get("holding_rule_alerts") or {}).get("reasons") or []
+        if alerts:
+            tg_lines.append("  Holding alerts: " + "; ".join(alerts))
+    tg_lines.append(f"⚡CU: {cu} ({', '.join(breakdown_cu)})")
+    out_telegram = "\n".join(tg_lines)
+
     if fmt == "plain":
-        print(f"Skill #23 · Junk Token Prediction — {chain.upper()}")
-        print(f"Mode: {mode_label} · {model_name}")
-        if want_holding:
-            print("Include: holding_distribution")
-        print(f"{'#':>3} {'Symbol':<12} {'JunkProb':>8} {'Verdict':>8} {'MCap':>12} {'Liq':>12} {'Vol24h':>12} {'Tx24h':>8} {'Trader':>8}")
-        print("-" * 95)
-        for i, r in enumerate(results, 1):
-            if r.get("error"):
-                print(f"{i:>3} {r['address'][:12]:<12} ERROR: {r['error']}")
-                continue
-            sym = (r.get("symbol") or "?")[:12]
-            sc = f"{r['junk_score']:.1f}" if r["junk_score"] is not None else "N/A"
-            junk = "JUNK" if r.get("is_junk") else "OK"
-            mc = _fmt_usd(r.get("mcap"))
-            liq = _fmt_usd(r.get("liquidity"))
-            vol = _fmt_usd(r.get("vol_24h"))
-            tx = f"{int(r['tx_24h']):,}" if r.get("tx_24h") is not None else "N/A"
-            tr = f"{int(r['trader_24h']):,}" if r.get("trader_24h") is not None else "N/A"
-            print(f"{i:>3} {sym:<12} {sc:>8} {junk:>8} {mc:>12} {liq:>12} {vol:>12} {tx:>8} {tr:>8}")
-        print(f"\n⚡CU: {cu} ({', '.join(breakdown_cu)})")
+        print(out_plain)
         return 0
     if fmt == "telegram":
-        lines = [
-            f"🗑️ Junk Token Prediction",
-            f"Chain: {chain.upper()} · Mode: {mode_label}",
-            f"Model: {model_name}",
-        ]
-        if want_holding:
-            lines.append("Include: holding_distribution")
-        for r in results:
-            if r.get("error"):
-                lines.append(f"• {r['address'][:16]}… → ERROR: {r['error']}")
-                continue
-            verdict = "🚫 JUNK" if r.get("is_junk") else "✅ OK"
-            lines.append(
-                f"• {r.get('name') or r.get('symbol') or r['address'][:12]} "
-                f"({r.get('symbol') or '?'})\n"
-                f"  Junk Probability: {r.get('junk_score', 0):.1f}/100 · {verdict}"
-            )
-            alerts = (r.get("holding_rule_alerts") or {}).get("reasons") or []
-            if alerts:
-                lines.append("  Holding alerts: " + "; ".join(alerts))
-        lines.append(f"⚡CU: {cu} ({', '.join(breakdown_cu)})")
-        print("\n".join(lines))
+        print(out_telegram)
         return 0
 
     # ── Build envelope ──
@@ -9723,6 +9732,22 @@ def cmd_junk_predict(args):
         if score_value < 75:
             return "#fb923c"  # orange
         return "#ef4444"      # red
+
+    def _liquid_depth_color(depth_log10: float | int | None) -> str:
+        # Higher liquidity depth should read as healthier:
+        # dark green (highest) -> light green -> yellow -> orange -> red (lowest).
+        if depth_log10 is None:
+            return "#8a93a6"
+        depth_log10 = float(depth_log10)
+        if depth_log10 >= 7:
+            return "#16a34a"
+        if depth_log10 >= 5.5:
+            return "#4ade80"
+        if depth_log10 >= 4:
+            return "#facc15"
+        if depth_log10 >= 3:
+            return "#fb923c"
+        return "#ef4444"
 
     def _fmt(v):
         if v is None:
@@ -9853,9 +9878,7 @@ def cmd_junk_predict(args):
         gap_color = "#8a93a6"
         if isinstance(val_liq_gap, (int, float)):
             gap_color = "#ef4444" if val_liq_gap > 3 else ("#f0b429" if val_liq_gap > 1.5 else "#2ecc71")
-        liq_color = "#8a93a6"
-        if isinstance(liquid_depth, (int, float)):
-            liq_color = "#ef4444" if liquid_depth < 3 else ("#fb923c" if liquid_depth < 5 else ("#facc15" if liquid_depth < 7 else "#22c55e"))
+        liq_color = _liquid_depth_color(liquid_depth)
         vph_color = "#8a93a6"
         if isinstance(vol_per_holder, (int, float)):
             vph_color = "#ef4444" if vol_per_holder < 1 else ("#f0b429" if vol_per_holder < 20 else "#22c55e")
@@ -10008,6 +10031,8 @@ def cmd_junk_predict(args):
         "cu_used_total": cu, "cu_breakdown": breakdown_cu,
         "params": envelope["params"],
         "snapshot_time": int(time.time()),
+        "rendered_plain": out_plain,
+        "rendered_telegram": out_telegram,
         "rendered_json": json.dumps(envelope, ensure_ascii=False),
         "rendered_ui": json.dumps(envelope, ensure_ascii=False),
         "rendered_raw-json": json.dumps(envelope, ensure_ascii=False),
@@ -10249,6 +10274,20 @@ def cmd_junk_quick_test(args):
             return "#fb923c"  # orange
         return "#ef4444"      # red
 
+    def _liquid_depth_color(depth_log10: float | int | None) -> str:
+        if depth_log10 is None:
+            return "#8a93a6"
+        depth_log10 = float(depth_log10)
+        if depth_log10 >= 7:
+            return "#16a34a"
+        if depth_log10 >= 5.5:
+            return "#4ade80"
+        if depth_log10 >= 4:
+            return "#facc15"
+        if depth_log10 >= 3:
+            return "#fb923c"
+        return "#ef4444"
+
     cards_html = ""
     for r in results:
         if r.get("error"):
@@ -10270,7 +10309,7 @@ def cmd_junk_quick_test(args):
         vol_per_holder = shared.get("vol_per_holder_usd")
         top3_pct = shared.get("top3_pct")
         gap_color = "#ef4444" if val_liq_gap > 3 else ("#f0b429" if val_liq_gap > 1.5 else "#2ecc71")
-        liq_color = "#8a93a6" if liquid_depth is None else ("#ef4444" if liquid_depth < 3 else ("#fb923c" if liquid_depth < 5 else ("#facc15" if liquid_depth < 7 else "#22c55e")))
+        liq_color = _liquid_depth_color(liquid_depth)
         vph_color = "#8a93a6" if vol_per_holder is None else ("#ef4444" if vol_per_holder < 1 else ("#f0b429" if vol_per_holder < 20 else "#22c55e"))
         top3_color = "#8a93a6" if top3_pct is None else ("#ef4444" if top3_pct > 95 else ("#f0b429" if top3_pct > 80 else "#22c55e"))
         floor_chip_html = ""
