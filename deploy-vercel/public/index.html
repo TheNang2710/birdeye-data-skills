@@ -463,30 +463,32 @@ $("outputArea").addEventListener("click", e=>{
 
 /* ── workflow drawer (click to show flow + steps) ────────────────────── */
 const FLOW_BY_ID = {
-  tl:{steps:["Pick chain + interval (1h/4h/24h)","Pick source (v3-list / trending) and sort field","Fetch the trending list from Birdeye","Scan the list and open Token DD on candidates"],prompt:"List the top trending Solana tokens over the last hour by volume, and flag any with suspicious liquidity."},
-  dd:{steps:["Paste the token address","Run the 10-step DD: overview + security + smart money + activity","Read the A-F grade and the BUY/SELL verdict","Drill into holders / risk tabs"],prompt:"Run a full due-diligence on this token and tell me whether it is safe to buy."},
-  contract_dd:{steps:["Paste the contract address","Compute sub-scores: Safety 45% · Holders 30% · Price 25%","Map the composite score to a tier (Safe/Caution/Risky/Danger)","Inspect the formula breakdown table"],prompt:"Scan this contract for mint/freeze authority, LP lock and holder concentration."},
-  stc:{steps:["Set chains + min MC + max volume","Filter out scam/spam tokens","Return the cleaned list"],prompt:"Filter spam tokens out of this list — keep only mcap above $1M with real volume."},
-  rugcheck:{steps:["Paste the token address","Fetch security + risk history + holder distribution","Build the 7 risk cards","Review Overview/Markets/Insiders/Holders/Lockers"],prompt:"Run a full rugcheck audit and list every risk with its severity."},
-  kline:{steps:["Paste the token and pick resolution/window","Fetch OHLCV candles","Detect candlestick patterns","Score the price action"],prompt:"Analyse the 15m candles for this token and identify the current pattern."},
-  trending_score:{steps:["Paste the token address","Fetch OHLCV (1s/1m) + liquidity + holders + security","Score Volume/Swap/Price/Liquidity/Holder momentum","Apply the security cap and return the 0-100 score"],prompt:"Score how strongly this token is trending right now across all intervals."},
-  junk:{steps:["Paste one or more token addresses","Fetch token_overview for each (~21 CU each)","Run the logistic-regression junk model","Read the junk score and verdict"],prompt:"Tell me which of these tokens are junk and why."},
-  junk_qt:{steps:["Pick chain + sample size","One scroll call pulls up to 5000 tokens (300 CU)","Random-sample N tokens","Run the ML junk model on list data"],prompt:"Randomly sample tokens and give me a junk-vs-healthy breakdown."},
-  wallet_score:{steps:["Paste the wallet address","Fetch PnL + trades + holdings","Compute the 0-100 alpha score and copy-tradeability","Compare against the smart-money baseline"],prompt:"Score this wallet's alpha and tell me whether it is worth copy-trading."},
-  wallet_style:{steps:["Paste the wallet and pick a duration","Analyse PnL and trade patterns","Classify the trading style"],prompt:"What style does this wallet trade in — scalper, swing or holder?"},
-  wallet_analysis:{steps:["Paste the wallet","PnL across the selected horizon","Assets + risk + style","Full deep-dive report"],prompt:"Give me a full deep-dive on this wallet: PnL, holdings, risk and style."},
-  sm_profile:{steps:["Paste the wallet","Performance trend + TP/SL patterns","Estimate copy-trade ROI","Verdict 🟢/🟡/🔴"],prompt:"Profile this smart-money wallet: style, TP/SL and copy-trade verdict."},
-  sm_leaderboard:{steps:["Paste up to 10 wallets","Score each wallet","Rank by composite score"],prompt:"Rank these wallets by smart-money score and pick the best one to follow."},
-  smart_wallets:{steps:["Pick depth + filter thresholds","Rank the top smart-money wallets","Filter by NW/WR/PnL"],prompt:"List the current top smart-money wallets ranked by net worth and win rate."},
+  tl:{doc:"trending-list-workflow.md",steps:["Pick chain + interval (1h/4h/24h)","Pick source (v3-list / trending) and sort field","Fetch the trending list from Birdeye","Scan the list and open Token DD on candidates"],prompt:"List the top trending Solana tokens over the last hour by volume, and flag any with suspicious liquidity."},
+  dd:{doc:"token-dd-workflow.md",steps:["Paste the token address","Run the 10-step DD: overview + security + smart money + activity","Read the A-F grade and the BUY/SELL verdict","Drill into holders / risk tabs"],prompt:"Run a full due-diligence on this token and tell me whether it is safe to buy."},
+  contract_dd:{doc:"contract-dd-workflow.md",steps:["Paste the contract address","Compute sub-scores: Safety 45% · Holders 30% · Price 25%","Map the composite score to a tier (Safe/Caution/Risky/Danger)","Inspect the formula breakdown table"],prompt:"Scan this contract for mint/freeze authority, LP lock and holder concentration."},
+  stc:{doc:"skill-06-spam-token-cleaner.md",steps:["Set chains + min MC + max volume","Filter out scam/spam tokens","Return the cleaned list"],prompt:"Filter spam tokens out of this list — keep only mcap above $1M with real volume."},
+  rugcheck:{doc:"skill-17b-rugcheck-audit.md",steps:["Paste the token address","Fetch security + risk history + holder distribution","Build the 7 risk cards","Review Overview/Markets/Insiders/Holders/Lockers"],prompt:"Run a full rugcheck audit and list every risk with its severity."},
+  kline:{doc:"skill-21-kline-pattern.md",steps:["Paste the token and pick resolution/window","Fetch OHLCV candles","Detect candlestick patterns","Score the price action"],prompt:"Analyse the 15m candles for this token and identify the current pattern."},
+  trending_score:{doc:"skill-22-token-trending-score.md",steps:["Paste the token address","Fetch OHLCV (1s/1m) + liquidity + holders + security","Score Volume/Swap/Price/Liquidity/Holder momentum","Apply the security cap and return the 0-100 score"],prompt:"Score how strongly this token is trending right now across all intervals."},
+  junk:{doc:"skill-11-junk-token-predict.md",steps:["Paste one or more token addresses","Fetch token_overview for each (~21 CU each)","Run the logistic-regression junk model","Read the junk score and verdict"],prompt:"Tell me which of these tokens are junk and why."},
+  junk_qt:{doc:"skill-13-junk-quick-test.md",steps:["Pick chain + sample size","One scroll call pulls up to 5000 tokens (300 CU)","Random-sample N tokens","Run the ML junk model on list data"],prompt:"Randomly sample tokens and give me a junk-vs-healthy breakdown."},
+  wallet_score:{doc:"wallet-score-workflow.md",steps:["Paste the wallet address","Fetch PnL + trades + holdings","Compute the 0-100 alpha score and copy-tradeability","Compare against the smart-money baseline"],prompt:"Score this wallet's alpha and tell me whether it is worth copy-trading."},
+  wallet_style:{doc:"wallet-style-workflow.md",steps:["Paste the wallet and pick a duration","Analyse PnL and trade patterns","Classify the trading style"],prompt:"What style does this wallet trade in — scalper, swing or holder?"},
+  wallet_analysis:{doc:"workflow-wallet-analysis.md",steps:["Paste the wallet","PnL across the selected horizon","Assets + risk + style","Full deep-dive report"],prompt:"Give me a full deep-dive on this wallet: PnL, holdings, risk and style."},
+  sm_profile:{doc:"workflow-smart-money-profile.md",steps:["Paste the wallet","Performance trend + TP/SL patterns","Estimate copy-trade ROI","Verdict 🟢/🟡/🔴"],prompt:"Profile this smart-money wallet: style, TP/SL and copy-trade verdict."},
+  sm_leaderboard:{doc:"workflow-smart-money-profile.md",steps:["Paste up to 10 wallets","Score each wallet","Rank by composite score"],prompt:"Rank these wallets by smart-money score and pick the best one to follow."},
+  smart_wallets:{doc:"README.md",steps:["Pick depth + filter thresholds","Rank the top smart-money wallets","Filter by NW/WR/PnL"],prompt:"List the current top smart-money wallets ranked by net worth and win rate."},
 };
-function flowFor(id){ return FLOW_BY_ID[id] || {steps:["Open a skill","Fill the parameters","▶ Run","Read the result"],prompt:"Explain what this skill does and how to use it."}; }
+function flowFor(id){ return FLOW_BY_ID[id] || {steps:["Open a skill","Fill the parameters","▶ Run","Read the result"],prompt:"Explain what this skill does and how to use it.",doc:null}; }
 function openFlow(){
   const s = state.skill, f = flowFor(s.id);
   $("fdTitle").textContent = `${s.icon} ${s.name} · Workflow`;
   const steps = f.steps.map((t,i)=>`<div class="flowStep"><div class="n">${i+1}</div><div class="txt">${esc(t)}</div></div>`).join("");
+  const doc = f.doc ? `<a class="docLink" href="/docs/${encodeURIComponent(f.doc)}" target="_blank" rel="noopener">📄 ${esc(f.doc)}</a>` : "";
   $("fdBody").innerHTML =
       `<div class="fd-sec"><h4>Flow · steps</h4>${steps}</div>`
-    + `<div class="fd-sec"><h4>Prompt · click to copy</h4><div class="promptBox" id="fdPrompt">${esc(f.prompt)}</div></div>`;
+    + `<div class="fd-sec"><h4>Prompt · click to copy</h4><div class="promptBox" id="fdPrompt">${esc(f.prompt)}</div></div>`
+    + (doc ? `<div class="fd-sec"><h4>Full workflow doc</h4>${doc}</div>` : "");
   const p = $("fdPrompt"); if(p) p.onclick = ()=>copyText(f.prompt);
   $("flowDrawer").classList.add("open");
   $("fdScrim").classList.add("show");
@@ -702,6 +704,48 @@ function normalizeRun(j){
           duration_ms:j.duration_ms, formats, text:stdout, stderr:j.stderr};
 }
 
+function htmlFromBlob(blob){
+  const t = String(blob || "").trim();
+  if(!t) return "";
+  if(t.startsWith("<")) return t;
+  if(t.startsWith("{") || t.startsWith("[")){
+    try{
+      const obj = JSON.parse(t);
+      if(obj && typeof obj === "object"){
+        if(typeof obj.html === "string" && obj.html.trim()) return obj.html;
+        if(typeof obj.rendered_html === "string" && obj.rendered_html.trim()) return obj.rendered_html;
+        if(obj.payload && typeof obj.payload.html === "string" && obj.payload.html.trim()) return obj.payload.html;
+      }
+    }catch(e){}
+  }
+  return "";
+}
+function textFallback(j){
+  const f = j.formats || {};
+  const stderr = String(j.stderr || "").trim();
+  const text = String(j.text || "").trim();
+  const stdout = String(j.stdout || "").trim();
+  if(stderr) return stderr;
+  if(text) return text;
+  if(stdout) return stdout;
+  if(f.plain) return f.plain;
+  if(f.json) return f.json;
+  return "";
+}
+function hydrateResult(j){
+  const f = Object.assign({ui:"", json:"", telegram:"", plain:""}, j.formats || {});
+  if(!f.ui){
+    f.ui = htmlFromBlob(j.html) || htmlFromBlob(j.text) || htmlFromBlob(j.stdout) || htmlFromBlob(f.json) || htmlFromBlob(f.plain);
+  }
+  if(!f.json){
+    const cand = [j.text, j.stdout, f.plain].map(v=>String(v || "").trim()).find(v=>v.startsWith("{") || v.startsWith("["));
+    if(cand) f.json = cand;
+  }
+  if(!j.text) j.text = textFallback(j);
+  j.formats = f;
+  return j;
+}
+
 async function runSkill(){
   const btn = $("runBtn");
   if(!keyPresent()){ toast("Add your Birdeye API key first"); toggleKeyFields(); return; }
@@ -726,7 +770,7 @@ async function runSkill(){
       else $("outputArea").innerHTML = `<pre class="out_body err">${esc(raw.error||JSON.stringify(raw))}</pre>`;
       return;
     }
-    const j = normalizeRun(raw);
+    const j = hydrateResult(normalizeRun(raw));
     showResult(j);
     histPush({id:j.runId||("local-"+Date.now()), ts:Date.now(), skillId:s.id, name:s.name,
               icon:s.icon, beta:!!s.beta, cu:j.cu, exit:j.exit, argv, formats:j.formats});
@@ -738,17 +782,19 @@ async function runSkill(){
 }
 
 function showResult(j){
-  state.last = j;
+  state.last = hydrateResult(j);
   const meta = [];
-  meta.push(`<span class="chip">exit ${j.exit}</span>`);
-  if(j.duration_ms) meta.push(`<span class="chip">${(j.duration_ms/1000).toFixed(1)}s</span>`);
-  if(j.cu) meta.push(`<span class="chip cu-chip">${j.cu} CU</span>`);
-  if(j.runId) meta.push(`<span class="chip">${esc(String(j.runId).slice(-10))}</span>`);
-  if(j.key_source) meta.push(`<span class="chip">key: ${esc(j.key_source)}</span>`);
-  if(j.exit === 124) meta.push('<span class="chip" style="color:var(--bad)">timeout — try a lighter skill</span>');
+  meta.push(`<span class="chip">exit ${state.last.exit}</span>`);
+  if(state.last.duration_ms) meta.push(`<span class="chip">${(state.last.duration_ms/1000).toFixed(1)}s</span>`);
+  if(state.last.cu) meta.push(`<span class="chip cu-chip">${state.last.cu} CU</span>`);
+  if(state.last.runId) meta.push(`<span class="chip">${esc(String(state.last.runId).slice(-10))}</span>`);
+  if(state.last.key_source) meta.push(`<span class="chip">key: ${esc(state.last.key_source)}</span>`);
+  if(state.last.format_used) meta.push(`<span class="chip">fmt: ${esc(state.last.format_used)}</span>`);
+  if(state.last.exit === 124) meta.push('<span class="chip" style="color:var(--bad)">timeout — try a lighter skill</span>');
+  if(state.last.exit && state.last.stderr) meta.push('<span class="chip" style="color:var(--bad)">see error output below</span>');
   $("metaArea").innerHTML = meta.join("");
 
-  const f = j.formats || {};
+  const f = state.last.formats || {};
   $("fmtTabs").querySelector('[data-fmt="telegram"]').style.display = f.telegram ? "" : "none";
   $("fmtTabs").querySelector('[data-fmt="json"]').style.display = f.json ? "" : "none";
   $("fmtTabs").style.display = "flex";
@@ -766,8 +812,12 @@ function paintFormat(fmt){
   if(!j){ area.innerHTML = ""; return; }
   const f = j.formats || {};
   if(fmt === "ui"){
-    area.innerHTML = f.ui ? `<div class="rendered-box">${f.ui}</div>`
-                          : `<pre class="out_body">${esc(j.text || "No UI output for this skill.")}</pre>`;
+    if(f.ui){
+      area.innerHTML = `<div class="rendered-box">${f.ui}</div>`;
+    } else {
+      const fallback = textFallback(j) || "No UI output for this skill.";
+      area.innerHTML = `<pre class="out_body ${j.exit ? 'err' : ''}">${esc(fallback)}</pre>`;
+    }
   } else if(fmt === "json"){
     let out = f.json || "";
     try{ out = JSON.stringify(JSON.parse(out), null, 2); }catch(e){}
