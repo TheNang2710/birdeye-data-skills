@@ -70,7 +70,9 @@ HERE = pathlib.Path(__file__).resolve().parent
 # Shared web app: same folder serves the local hub (8765) and the Vercel deploy.
 PUBLIC = HERE / "deploy-vercel" / "public"
 SKILL_SCREENER = HERE / "birdeye-screener"
-CLI_PATH = SKILL_SCREENER / "scripts" / "birdeye_cli.py"
+# Local UI must use the same bundled CLI as deploy-vercel so format support and
+# skill behavior stay in sync between localhost and Vercel.
+CLI_PATH = HERE / "deploy-vercel" / "api" / "_cli" / "scripts" / "birdeye_cli.py"
 SCREENER_PATH = SKILL_SCREENER / "scripts" / "birdeye_screener.py"
 SIMPLE_PATH = SKILL_SCREENER / "scripts" / "birdeye_trending_simple.py"
 
@@ -623,20 +625,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
-        if parsed.path in ("/", "/index.html", "/home.html"):
-            html_p = PUBLIC / "index.html"
-            try:
-                data = html_p.read_bytes()
-                # Inject CATALOG_JSON_RAW so hub.js uses the fresh server catalog
-                # directly (no fetch dependency, no stale cache).
-                cat_json = _js_str_escape(json.dumps(_30_SKILLS_CATALOG, ensure_ascii=False))
-                inject = f"<script>window.CATALOG_JSON_RAW = '{cat_json}';</script>"
-                data = data.replace(b"</head>", inject.encode("utf-8") + b"</head>", 1)
-            except Exception as e:
-                data = f"<html><body><pre>read home.html fail: {e}</pre></body></html>".encode("utf-8")
-            self._send_html(200, data)
-            return
-        if parsed.path in ("/test", "/test.html"):
+        if parsed.path in ("/", "/index.html", "/home.html", "/test", "/test.html"):
             html_p = PUBLIC / "test.html"
             try:
                 data = html_p.read_bytes()
@@ -737,16 +726,26 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         if parsed.path == "/api/history/render":
             run_id = (qs.get("runId") or qs.get("run_id") or [""])[0]
-            fmt = (qs.get("format") or ["render"])[0]
+            fmt = (qs.get("format") or ["ui"])[0].lower()
             if not run_id:
                 self._send_json(400, {"error": "runId required"})
                 return
-            if fmt not in {"render", "plain", "telegram", "raw-json"}:
-                fmt = "render"
-            argv = ["history-render", "--run-id", run_id, "--format", fmt]
+            fmt_map = {
+                "ui": "render",
+                "plain": "plain",
+                "telegram": "telegram",
+                "json": "raw-json",
+                # backward-compatible aliases
+                "render": "render",
+                "raw-json": "raw-json",
+                "rendered": "render",
+                "scorecard": "render",
+            }
+            cli_fmt = fmt_map.get(fmt, "render")
+            argv = ["history-render", "--run-id", run_id, "--format", cli_fmt]
             res = run_script_argv("birdeye_cli", argv, None)
             # if UI requested renderer payload: return JSON directly (stdout)
-            if fmt == "render":
+            if cli_fmt == "render":
                 out_obj = {"success": False, "cached": True, "cu_used_total": 0}
                 if res.get("exit") == 0 and (res.get("stdout") or "").strip():
                     try:
@@ -758,7 +757,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                     out_obj["error"] = res
                 self._send_json(200 if out_obj.get("payload") else 500, out_obj)
                 return
-            # Plain / Telegram / raw-json => return text envelope
+            # Plain / Telegram / JSON => return text envelope
             self._send_json(200, {"runId": run_id, "format": fmt, "exit": res.get("exit"),
                                    "stdout": res.get("stdout", ""), "stderr": res.get("stderr", ""),
                                    "duration_ms": res.get("duration_ms", 0)})

@@ -32,46 +32,56 @@
 <div id="homeView" style="display:none"></div>
 <main id="drillView">
   <aside class="catalog" id="catalog"></aside>
-
-  <nav class="ctrl" id="ctrl">
-    <div class="group" id="g_key">
-      <h3>🔑 API Key</h3>
-      <div id="keyInfo"><span class="subtle">Loading key…</span></div>
-      <div id="keyActions" style="display:none" class="keybox">
-        <div class="subtle" style="font-size:12px;margin-bottom:4px">Paste key (32 chars typically):</div>
-        <div style="display:flex;gap:6px;align-items:stretch">
-          <input id="pasteKey" type="password" placeholder="dc9909a243924571b64f7c65fa2c032f…" style="flex:1;font-family:monospace;font-size:12px;padding:8px 10px;border-radius:8px;background:var(--input-bg);border:1px solid var(--line);color:var(--text);outline:none" />
-          <button type="button" class="btn ghost keyEyeBtn" id="pasteKey_eye" title="Show/hide key">👁</button>
-        </div>
-        <div class="copyrow" style="margin-top:6px">
-          <button class="btn primary" id="applySession">Apply · Session only (RAM)</button>
-          <button class="btn" id="savePersist">💾 Save to ~/.birdeye.env</button>
-          <button class="btn ghost" id="clearKey">Clear session</button>
-        </div>
-      </div>
-    </div>
-
-    <div class="group" id="skillCtrl"></div>
-
-    <div class="group">
-      <div class="section-title">Quick tests</div>
-      <div class="copyrow">
-        <button class="btn" data-quick="hot">Trending SOL 1h</button>
-        <button class="btn" data-quick="pump">Pump.fun hot</button>
-        <button class="btn" data-quick="hee">DD · HeeHaw</button>
-        <button class="btn" data-quick="spcx">DD · SPCX (SM #1)</button>
-      </div>
-    </div>
-
-    <div class="group" id="nextActionsWrap" style="display:none">
-      <div class="section-title">⚡ Next Actions for selected token</div>
-      <div id="selToken" class="subtle"></div>
-      <div class="nextactions" id="nextActions"></div>
-    </div>
-  </nav>
-
+  <section class="detailMain">
   <section class="outWrap">
-    <div id="installColTop" class="installColTop"></div>
+    <div class="inputDock" id="inputDock">
+      <div class="inputDockMain">
+        <div class="topPanels">
+          <div class="group" id="g_key">
+            <h3>🔑 API Key</h3>
+            <div id="keyInfo"><span class="subtle">Loading key…</span></div>
+            <div id="keyActions" style="display:none" class="keybox">
+              <div class="subtle" style="font-size:12px;margin-bottom:4px">Paste key (32 chars typically):</div>
+              <div style="display:flex;gap:6px;align-items:stretch">
+                <input id="pasteKey" type="password" placeholder="dc9909a243924571b64f7c65fa2c032f…" style="flex:1;font-family:monospace;font-size:12px;padding:8px 10px;border-radius:8px;background:var(--input-bg);border:1px solid var(--line);color:var(--text);outline:none" />
+                <button type="button" class="btn ghost keyEyeBtn" id="pasteKey_eye" title="Show/hide key">👁</button>
+              </div>
+              <div class="copyrow" style="margin-top:6px">
+                <button class="btn primary" id="applySession">Apply · Session only (RAM)</button>
+                <button class="btn" id="savePersist">💾 Save to ~/.birdeye.env</button>
+                <button class="btn ghost" id="clearKey">Clear session</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="group" id="skillCtrl"></div>
+        </div>
+
+        <div class="topPanelsAux">
+          <div class="group">
+            <div class="section-title">Quick tests</div>
+            <div class="copyrow">
+              <button class="btn" data-quick="hot">Trending SOL 1h</button>
+              <button class="btn" data-quick="pump">Pump.fun hot</button>
+              <button class="btn" data-quick="hee">DD · HeeHaw</button>
+              <button class="btn" data-quick="spcx">DD · SPCX (SM #1)</button>
+            </div>
+          </div>
+
+          <div class="group" id="nextActionsWrap" style="display:none">
+            <div class="section-title">⚡ Next Actions for selected token</div>
+            <div id="selToken" class="subtle"></div>
+            <div class="nextactions" id="nextActions"></div>
+          </div>
+        </div>
+      </div>
+
+      <aside class="dockActions" id="dockActions">
+        <button class="dockBtn" id="openCoreBtn" type="button" title="Open Core Capabilities">⚡ Core</button>
+        <button class="dockBtn" id="openFlowBtn" type="button" title="Open Flow / prompts / docs">🧭 Flow</button>
+      </aside>
+    </div>
+
     <section class="out"><div id="out"></div></section>
     <aside class="histCol" id="histCol">
       <div class="group" style="padding:10px 12px">
@@ -87,8 +97,18 @@
       </div>
     </aside>
   </section>
+  </section>
 </main>
 
-<script defer src="/hub.js?v=5"></script>
+<div class="sideDrawerScrim" id="sideDrawerScrim"></div>
+<aside class="sideDrawer" id="sideDrawer" aria-hidden="true">
+  <div class="sideDrawerHead">
+    <div class="sideDrawerTitle" id="sideDrawerTitle">Details</div>
+    <button class="btn ghost" id="sideDrawerClose" type="button" title="Close">✕</button>
+  </div>
+  <div class="sideDrawerBody" id="sideDrawerBody"></div>
+</aside>
+
+<script defer src="/hub.js?v=8"></script>
 </body>
 </html>

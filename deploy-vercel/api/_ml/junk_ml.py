@@ -23,14 +23,16 @@ from typing import Any
 # and the birdeye-screener workspace layout.
 _MODULE_DIR = Path(__file__).resolve().parent
 _SKILL_ROOT = _MODULE_DIR.parent.parent  # birdeye-screener/
+_PARENTS = Path(__file__).resolve().parents
 _MODEL_CANDIDATES = [
     _MODULE_DIR / "lr_params.json",
     _SKILL_ROOT / "lr_params.json",
     _SKILL_ROOT / "test" / "valuation" / "lr_params.json",
-    # Original training notebook location
-    Path(__file__).resolve().parents[5] / "test" / "valuation" / "lr_params.json",
     Path.cwd() / "lr_params.json",
 ]
+if len(_PARENTS) > 5:
+    # Original training notebook location in the full workspace checkout.
+    _MODEL_CANDIDATES.append(_PARENTS[5] / "test" / "valuation" / "lr_params.json")
 
 
 def _load_model() -> dict[str, Any]:

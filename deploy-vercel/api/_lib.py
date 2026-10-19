@@ -33,6 +33,7 @@ ENV_KEY_ALLOWED = (not IS_SERVERLESS) or os.environ.get("BIRDEYE_ALLOW_ENV_KEY")
 # ── Paths ───────────────────────────────────────────────────────────────────
 SCRATCH = pathlib.Path(os.environ.get("BIRDEYE_SCRATCH_DIR") or "/tmp/birdeye")
 CACHE_DIR = SCRATCH / "runs"
+VENDOR_DIR = HERE / "_vendor"
 
 _CLI_REL = ("_cli", "scripts", "birdeye_cli.py")
 CLI_CANDIDATES = [
@@ -88,6 +89,9 @@ def build_env(key: str) -> dict:
     env["HOME"] = str(SCRATCH)  # every Path.home() write now hits /tmp
     env["BIRDEYE_CACHE_DIR"] = str(CACHE_DIR)
     env["PYTHONDONTWRITEBYTECODE"] = "1"
+    if VENDOR_DIR.exists():
+        existing = env.get("PYTHONPATH", "").strip()
+        env["PYTHONPATH"] = f"{VENDOR_DIR}{os.pathsep}{existing}" if existing else str(VENDOR_DIR)
     env.pop("BIRDEYE_API_KEY", None)
     if key:
         env["BIRDEYE_API_KEY"] = key

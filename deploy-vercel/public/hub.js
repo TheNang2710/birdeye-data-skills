@@ -1214,11 +1214,29 @@ SKILL_CTRLS.sm_flow_token = ()=>{
     </div>`;
 };
 
+function canonFormat(fmt){
+  const f = String(fmt || '').toLowerCase();
+  if(f === 'render' || f === 'rendered' || f === 'scorecard' || f === 'rugcheck' || f === 'compact') return 'ui';
+  if(f === 'raw-json') return 'json';
+  if(f === 'plain' || f === 'telegram' || f === 'json' || f === 'ui') return f;
+  return 'ui';
+}
+
+function cliFormatFor(side, fmt){
+  const f = canonFormat(fmt);
+  if(f === 'json') return (side === 'dd' || side === 'tl' || side === 'rca' || side === 'junk' || side === 'junk_qt') ? 'raw-json' : 'raw-json';
+  if(f === 'plain' || f === 'telegram') return f;
+  if(side === 'dd') return 'scorecard';
+  if(side === 'rca') return 'raw-json';
+  if(side === 'tl') return 'raw-json';
+  return 'rendered';
+}
+
 function selectedFmt(side){
-  // side = 'tl' or 'dd'. Return render/plain/telegram/raw-json. Defaults render.
+  // Return canonical ui/plain/telegram/json.
   const sel = document.querySelectorAll('#skillCtrl .bfmt.on');
-  for(const b of sel){ return b.dataset.fmt || 'render'; }
-  return 'render';
+  for(const b of sel){ return canonFormat(b.dataset.fmt || 'ui'); }
+  return 'ui';
 }
 
 // ---------- Universal 3-section skill-detail footer (opponent copy flow: Install / Core Capabilities / Agent prompts) ----------
@@ -1742,16 +1760,10 @@ function _wireDetailFooterWiring(skillId){
       const panel = document.getElementById('skillCtrl');
       if(!panel || !desiredFmt) return;
       let found = null;
+      const want = canonFormat(desiredFmt);
       panel.querySelectorAll('.bfmt').forEach(b=>{
-        const f = b.dataset.fmt || '';
-        if(f === desiredFmt) found = b;
-        // map alias: render (dd/sc) => render; scorecard => 'scorecard'; plain->'plain'; telegram->'telegram'; json->raw-json
-        if(!found){
-          const d = String(desiredFmt).toLowerCase();
-          if(f === 'raw-json' && d.includes('json')) found = b;
-          if(f === 'render' && (d==='render'||d==='scorecard')) found = b;
-          if(f==='scorecard' && d==='scorecard') found = b;
-        }
+        const f = canonFormat(b.dataset.fmt || '');
+        if(f === want) found = b;
       });
       if(found){
         panel.querySelectorAll('.bfmt').forEach(b=>b.classList.remove('on'));
@@ -1889,17 +1901,180 @@ function wireFormatButtonsInPanel(side){
   });
 }
 
+const DRAWER_FLOW_BY_ID = {
+  tl: {
+    steps: ["Choose the chain", "Run the trending scan", "Review the ranked token list", "Open the next action you want to inspect"],
+    doc: "trending-list-workflow.md",
+  },
+  tl_v3: {
+    steps: ["Choose the chain", "Run the V3 token list", "Inspect the ranked rows", "Open the token you want to drill into"],
+    doc: "skill-01b-v3-token-list.md",
+  },
+  dd: {
+    steps: ["Paste the token address", "Run the DD scan", "Read the scorecard + verdict", "Use next actions to continue investigation"],
+    doc: "token-dd-workflow.md",
+  },
+  rugcheck_risk_audit: {
+    steps: ["Paste the token address", "Run the RugCheck audit", "Review the risk tabs", "Check holders / liquidity / lockers before acting"],
+    doc: "skill-17b-rugcheck-audit.md",
+  },
+  wallet_score: {
+    steps: ["Paste the wallet address", "Run the wallet score", "Review alpha + copy-tradeability", "Compare the wallet against your baseline"],
+    doc: "wallet-score-workflow.md",
+  },
+  wallet_style: {
+    steps: ["Paste the wallet address", "Run the style classifier", "Review frequency + PnL profile", "Use the output to segment trader behavior"],
+    doc: "wallet-style-workflow.md",
+  },
+  sm_flow_token: {
+    steps: ["Paste the wallet address", "Run wallet analysis", "Inspect assets / PnL / risk", "Decide whether deeper copy-trade review is worth it"],
+    doc: "workflow-wallet-analysis.md",
+  },
+  contract_dd: {
+    steps: ["Paste the token address", "Run contract DD", "Review composite risk pillars", "Check whether contract / holder / price risks agree"],
+    doc: "contract-dd-workflow.md",
+  },
+  kline_pattern: {
+    steps: ["Paste the token address", "Choose resolution + window", "Run the pattern scan", "Read the current pattern + score"],
+    doc: "kline-pattern-workflow.md",
+  },
+  trending_score: {
+    steps: ["Paste the token address", "Run the momentum model", "Review the 0-100 score", "Compare momentum vs security cap"],
+    doc: "skill-22-token-trending-score.md",
+  },
+};
+
+function _copyPlainText(val){
+  const txt = String(val || '').trim();
+  if(!txt) return;
+  if(navigator.clipboard?.writeText){
+    navigator.clipboard.writeText(txt).catch(()=>{});
+    return;
+  }
+  try{
+    const ta = document.createElement('textarea');
+    ta.value = txt;
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    document.body.removeChild(ta);
+  }catch(_){}
+}
+
+function _flowMetaFor(skillId){
+  const meta = DRAWER_FLOW_BY_ID[skillId] || {};
+  const skillMeta = _skillMeta(skillId);
+  return {
+    steps: meta.steps || ["Fill the user inputs", "Click Run", "Review the result", "Switch format or continue with next actions"],
+    doc: meta.doc || null,
+    prompts: skillMeta.agentPrompts || [],
+    installPrompt: skillMeta.installPrompt || '',
+  };
+}
+
+function closeSkillDrawer(){
+  $('sideDrawer')?.classList.remove('open');
+  $('sideDrawerScrim')?.classList.remove('show');
+  $('sideDrawer')?.setAttribute('aria-hidden', 'true');
+}
+
+function openSkillDrawer(kind){
+  const drawer = $('sideDrawer');
+  const body = $('sideDrawerBody');
+  const title = $('sideDrawerTitle');
+  if(!drawer || !body || !title) return;
+  const skillId = window.STATE.skill;
+  const meta = _skillMeta(skillId);
+  const flow = _flowMetaFor(skillId);
+  const skillObj = CATALOG.flatMap(g=>g.items||[]).find(it=>it.id===skillId) || null;
+  const skillTitle = skillObj?.title || skillId || 'Skill';
+  window.STATE.drawerMode = kind;
+
+  if(kind === 'core'){
+    const caps = (meta.coreCaps || []).map(c=>`<div class="drawerCard">${htmlEscape(c)}</div>`).join('');
+    const apiAgg = meta.apiAgg ? `
+      <div class="drawerSection">
+        <h4>API aggregate</h4>
+        <div class="drawerCard"><code>${htmlEscape(meta.apiAgg)}</code></div>
+      </div>` : '';
+    title.textContent = `⚡ ${skillTitle} · Core`;
+    body.innerHTML = `
+      <div class="drawerSection">
+        <h4>Core capabilities</h4>
+        <div class="drawerList">${caps || '<div class="drawerCard subtle">No capabilities listed yet.</div>'}</div>
+      </div>
+      ${apiAgg}`;
+  } else {
+    const steps = (flow.steps || []).map((step, i)=>`
+      <div class="drawerStep">
+        <div class="n">${i + 1}</div>
+        <div class="txt">${htmlEscape(step)}</div>
+      </div>`).join('');
+    const prompts = (flow.prompts || []).map(prompt=>`
+      <div class="drawerCard drawerPrompt" data-copy="${htmlEscape(prompt)}" title="Click to copy">${htmlEscape(prompt)}</div>`).join('');
+    const doc = flow.doc ? `<a class="btn ghost" href="/docs/${encodeURIComponent(flow.doc)}" target="_blank" rel="noopener" style="text-decoration:none;width:max-content">📄 ${htmlEscape(flow.doc)}</a>` : '<div class="subtle">No workflow doc linked yet.</div>';
+    const install = flow.installPrompt ? `
+      <div class="drawerSection">
+        <h4>CLI equivalent</h4>
+        <div class="drawerCard drawerPrompt" data-copy="${htmlEscape(flow.installPrompt)}" title="Click to copy">${htmlEscape(flow.installPrompt)}</div>
+      </div>` : '';
+    title.textContent = `🧭 ${skillTitle} · Flow`;
+    body.innerHTML = `
+      <div class="drawerSection">
+        <h4>Flow steps</h4>
+        <div class="drawerSteps">${steps}</div>
+      </div>
+      <div class="drawerSection">
+        <h4>Agent prompts</h4>
+        <div class="drawerList">${prompts || '<div class="drawerCard subtle">No prompts listed yet.</div>'}</div>
+      </div>
+      <div class="drawerSection">
+        <h4>Workflow doc</h4>
+        ${doc}
+      </div>
+      ${install}`;
+    body.querySelectorAll('[data-copy]').forEach(el=>{
+      el.onclick = ()=>_copyPlainText(el.getAttribute('data-copy') || el.innerText || '');
+    });
+  }
+  drawer.classList.add('open');
+  drawer.setAttribute('aria-hidden', 'false');
+  $('sideDrawerScrim')?.classList.add('show');
+}
+
+function initSkillDrawer(){
+  $('openCoreBtn') && ($('openCoreBtn').onclick = ()=>openSkillDrawer('core'));
+  $('openFlowBtn') && ($('openFlowBtn').onclick = ()=>openSkillDrawer('flow'));
+  $('sideDrawerClose') && ($('sideDrawerClose').onclick = closeSkillDrawer);
+  $('sideDrawerScrim') && ($('sideDrawerScrim').onclick = closeSkillDrawer);
+  document.addEventListener('keydown', e=>{ if(e.key === 'Escape') closeSkillDrawer(); });
+}
+
+function syncDetailDock(meta){
+  const coreBtn = $('openCoreBtn');
+  const flowBtn = $('openFlowBtn');
+  if(coreBtn){
+    const count = (meta?.coreCaps || []).length;
+    coreBtn.textContent = count ? `⚡ Core · ${count}` : '⚡ Core';
+    coreBtn.disabled = !window.STATE.skill;
+  }
+  if(flowBtn){
+    flowBtn.textContent = '🧭 Flow';
+    flowBtn.disabled = !window.STATE.skill;
+  }
+}
+
 function renderSkillCtrl(){
   const fn = SKILL_CTRLS[window.STATE.skill] || (()=>`<h3>${window.STATE.skill}</h3><div class="subtle">Choose from catalog.</div>`);
   $('skillCtrl').innerHTML = fn();
   const t = window.STATE.skill;
-  // ---- Col2: control panel + Core Capabilities + Agent prompts (Installation moved to Col3 top) ----
   const meta = _skillMeta(t);
-  $('skillCtrl').innerHTML += _wrapCoreCapsList(meta.coreCaps)
-                          + _wrapAgentPromptsList(meta.agentPrompts);
-  // ---- Col3: Top pinned Installation block (dropdown preset UI friendly) ----
-  const installCol = $('installColTop');
-  if(installCol){ installCol.innerHTML = _wrapInstallationCard(meta); }
+  syncDetailDock(meta);
+  if($('sideDrawer')?.classList.contains('open') && window.STATE.drawerMode){
+    openSkillDrawer(window.STATE.drawerMode);
+  }
   // Wire run buttons
   if(t==='tl' || t==='tl_v3'){
     wireFormatButtonsInPanel('tl');
@@ -2146,7 +2321,7 @@ async function loadRunFromHistory(runId, kindHint){
     renderCatalog();
     renderSkillCtrl();
   }
-  // 1. Use the user's currently-selected format in the panel, else default 'render'
+  // 1. Use the user's currently-selected canonical format (ui/plain/telegram/json)
   const userFmt = selectedFmt(side);
   // 2. Update lastRun record (so next format-switch works against this run)
   window.STATE.lastRun = { runId, side, kind: kindHint, lastFmt: userFmt };
@@ -2164,15 +2339,14 @@ async function renderFormat(fmt, runId, kind, side, {fromHistory=false}={}){
   out.innerHTML = `<div class="render"><div><span class="loading">⟳</span> Rendering ${fmt} from cache (0 CU)…</div></div>`;
   try{
     let renderResult;
-    if(fmt==='render' || fmt==='plain' || fmt==='telegram' || fmt==='raw-json'){
-      // Fetch CLI history-render: if render → JSON; else → text stdout
+    if(fmt==='ui' || fmt==='plain' || fmt==='telegram' || fmt==='json'){
       const url = '/api/history/render?runId=' + encodeURIComponent(runId) + '&format=' + fmt;
       const j = await fetch(url).then(r=>r.json());
       renderResult = j;
     }
     const fmtBarHtml = fmtButtonsHtml(fmt, runId, kind);
     let bodyBlock;
-    if(fmt==='render'){
+    if(fmt==='ui'){
       const payload = renderResult?.payload;
       if(!payload){
         bodyBlock = `<div class="render"><div class="bad">Cache parse error. ${htmlEscape(renderResult?.error||String(renderResult||''))}</div></div>`;
@@ -2215,7 +2389,9 @@ async function renderFormat(fmt, runId, kind, side, {fromHistory=false}={}){
       }
     }
     const cmdDisplay = cachedCmd ? cachedCmd : ('CACHED (0 CU) — runId='+runId);
-    out.innerHTML = `${fmtBarHtml}
+    const summaryArgv = Array.isArray(lr.argv) ? lr.argv : (Array.isArray(renderResult?.payload?.params?.argv) ? renderResult.payload.params.argv : null);
+    out.innerHTML = `${paramsSummaryHtml(summaryArgv)}
+      ${fmtBarHtml}
       <div class="cmd" style="display:flex;align-items:center;gap:8px"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${htmlEscape(cmdDisplay)}</span><button class="btn ghost" type="button" style="padding:2px 8px;font-size:12px;flex-shrink:0" title="Copy full CLI command" onclick="const t=this.previousElementSibling.textContent;navigator.clipboard.writeText(t).then(()=>{this.textContent='✓';setTimeout(()=>this.textContent='📋',1000)})">📋</button></div>
       <div class="meta">
         <span class="chip">cached ✓</span>
@@ -2224,7 +2400,7 @@ async function renderFormat(fmt, runId, kind, side, {fromHistory=false}={}){
         ${fromHistory?`<span class="chip good">loaded from history</span>`:''}
       </div>
       ${bodyBlock}`;
-    if(fmt==='render'){ attachSel(out); }
+    if(fmt==='ui'){ attachSel(out); }
   }catch(e){
     out.innerHTML = `<div class="render"><div class="bad">Error cache render: ${htmlEscape(e.message||String(e))}</div></div>`;
   }
@@ -2235,16 +2411,11 @@ function fmtButtonsHtml(activeFmt, runId, kind){
   const but = (fmt,label) =>
     `<button class="bfmt ${activeFmt===fmt?'on':''}" onclick="renderFormat('${fmt}','${runId}','${kind||''}','${window.STATE.lastRun?.side||'tl'}')">${label}</button>`;
   const totalCu = window.STATE.lastRun?.cu_used_total ?? window.__lastFmtCu ?? '';
-  const isRCA = (window.STATE.lastRun?.side==='rca') || kind==='rugcheck-audit' || kind==='rugcheck-risk-audit';
-  const isDD = (window.STATE.lastRun?.side==='dd') || kind==='token-dd';
-  const isWalletScore = (window.STATE.lastRun?.side==='wallet_score') || kind==='wallet-score' || kind==='wallet-alpha-score-v1' || kind==='wallet-score-compact-v1';
-  const isWalletStyle = (window.STATE.lastRun?.side==='wallet_style') || kind==='wallet-style-v1';
-  const firstBtnLabel = isDD ? 'Scorecard' : (isRCA ? 'RugCheck' : (isWalletScore ? 'Wallet Score' : (isWalletStyle ? 'Wallet Style' : 'Render')));
   return `<div class="fmtbar">
-    ${but('render', firstBtnLabel)}
+    ${but('ui', 'UI')}
     ${but('plain','Plain')}
     ${but('telegram','Telegram')}
-    ${but('raw-json','JSON')}
+    ${but('json','JSON')}
     <div class="spacer"></div>
     <span class="cacheBadge">💾 Cached run · Original API cost <b>⚡${totalCu || 'N/A'}</b> CU · Re-render = 0 CU</span>
     <button class="btn ghost" onclick="forceRerunCurrent()" title="Delete cache + call API again">⟳ Run fresh (charge CU)</button>
@@ -2293,6 +2464,46 @@ function cmdText(script, argv){
     : script==='stc' ? 'python3 birdeye-screener/scripts/stc.py'
     : 'python3 birdeye-screener/scripts/birdeye_trending_simple.py';
   return base + ' ' + argv.map(a=>/^[A-Za-z0-9_=.-]+$/.test(a)?a:JSON.stringify(a)).join(' ');
+}
+function paramsSummaryHtml(argv){
+  if(!Array.isArray(argv) || !argv.length) return '';
+  const labelMap = {
+    chain:'Chain', address:'Address', wallet:'Wallet', interval:'Window', duration:'Duration',
+    resolution:'Resolution', window:'Window', platform:'Platform', source:'Source', sort_by:'Sort',
+    'sort-by':'Sort', limit:'Limit', pnl_method:'PnL', 'pnl-method':'PnL', horizon:'Horizon',
+    candles:'Candles', rug_liq_window:'Liq window', 'rug-liq-window':'Liq window',
+    rug_holders_top_n:'Top holders', 'rug-holders-top-n':'Top holders', chains:'Chains',
+    min_mc:'Min MC', 'min-mc':'Min MC', max_vol:'Max Vol', 'max-vol':'Max Vol',
+    max_tokens:'Max tokens', 'max-tokens':'Max tokens', num:'Sample size'
+  };
+  const ignore = new Set(['format', 'nocache']);
+  const items = [];
+  for(let i=1; i<argv.length; i++){
+    const token = argv[i];
+    if(typeof token !== 'string' || !token.startsWith('--')) continue;
+    const key = token.slice(2);
+    if(ignore.has(key)) continue;
+    const next = argv[i + 1];
+    let value = 'yes';
+    let full = 'yes';
+    if(next !== undefined && !(typeof next === 'string' && next.startsWith('--'))){
+      value = String(next);
+      full = value;
+      i += 1;
+    }
+    if(key === 'tokens'){
+      const count = value.split(/[\s,]+/).filter(Boolean).length;
+      value = `${count} token${count === 1 ? '' : 's'}`;
+    }else if((key === 'address' || key === 'wallet') && value.length > 18){
+      value = addrCut(value, 8, 6);
+    }
+    items.push({label: labelMap[key] || key.replace(/_/g, ' ').replace(/-/g, ' '), value, full});
+  }
+  if(!items.length) return '';
+  return `<div class="resultIntro">
+    <div class="section-title">User input</div>
+    <div class="paramChips">${items.map(it=>`<div class="paramChip" title="${htmlEscape(it.full)}"><b>${htmlEscape(it.label)}</b>${htmlEscape(it.value)}</div>`).join('')}</div>
+  </div>`;
 }
 async function refreshKeyBox(){
   ensureGlobalKeyCollapse();
@@ -3540,15 +3751,15 @@ async function runCLI(side, {formatOverride=null}={}){
   // ===== PREFLIGHT (0 CU) — FAIL fast, NO /api/run POST =====
   const keyOk = await _keySetOk();
   if(!keyOk){
-    out.innerHTML = `<div class="render"><div class="bad">🛑 API key NOT SET. Paste key in 🔑 API Key panel (sidebar) → Apply session, then retry.</div></div>`;
+    out.innerHTML = `<div class="render"><div class="bad">🛑 API key NOT SET. Paste key in the top 🔑 API Key panel, click Apply session, then retry.</div></div>`;
     return;
   }
   let script='birdeye_cli', argv=[], payloadKey='';
   let fmtChosen = '', fmtUse = '';
   let kindHint = side==='dd' ? 'token-dd' : (side==='rca' ? 'rugcheck-audit' : (side==='sm' ? 'smart-money-profile-v1' : (side==='wa' ? 'wallet-analysis-v1' : 'trending-list')));
   if(side==='tl'){
-    fmtChosen = formatOverride || 'render';
-    fmtUse = (fmtChosen==='render') ? 'raw-json' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || 'ui');
+    fmtUse = cliFormatFor('tl', fmtChosen);
     const chain = $('tl_chain')?.value || 'sol';
     const isV3 = (window.STATE.skill==='tl_v3');
     const interval = '24h';
@@ -3558,22 +3769,22 @@ async function runCLI(side, {formatOverride=null}={}){
     argv = ['trending-list','--chain',chain,'--interval',interval,
       '--source',source,'--sort-by',sortBy,'--limit',limit,
       '--format',fmtUse];
-    payloadKey = (fmtChosen==='render' ? 'render-tl' : fmtUse);
+    payloadKey = (fmtChosen==='ui' ? 'ui-tl' : fmtChosen);
     kindHint = 'trending-list';
   }else if(side==='dd'){
     const addr = ($('dd_address')?.value || window.STATE.selection?.addr || '').trim();
     const chain = $('dd_chain')?.value || 'sol';
-    fmtChosen = formatOverride || 'render';
-    fmtUse = (fmtChosen==='render') ? 'scorecard' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || 'ui');
+    fmtUse = cliFormatFor('dd', fmtChosen);
     const a = validateAnyAddr(addr, chain);
     if(!a.ok){ out.innerHTML = `<div class="render"><div class="bad">🛑 ${a.msg}</div></div>`; return; }
     argv = ['token-dd','--chain',chain,'--address',addr,'--format',fmtUse];
-    payloadKey = (fmtChosen==='render' ? 'render-dd' : fmtUse);
+    payloadKey = (fmtChosen==='ui' ? 'ui-dd' : fmtChosen);
     kindHint = 'token-dd';
   }else if(side==='sm'){
     // Skill #9 Smart Money Profile — single-wallet behavior analysis
-    fmtChosen = formatOverride || selectedFmt('sm');
-    fmtUse = (fmtChosen==='render') ? 'rendered' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || selectedFmt('sm'));
+    fmtUse = cliFormatFor('sm', fmtChosen);
     const chainSm = ($('dd_chain')?.value || 'sol');
     const walletSm = ($('sm9_wallet')?.value || '').trim();
     if(!walletSm){ out.innerHTML = `<div class="render"><div class="bad">🛑 Wallet address is required.</div></div>`; return; }
@@ -3584,12 +3795,12 @@ async function runCLI(side, {formatOverride=null}={}){
       '--format', fmtUse];
     if($('sm9_skip_tx')?.checked) argv.push('--skip-tx-list');
     if($('sm9_skip_first')?.checked) argv.push('--skip-first-tx');
-    payloadKey = (fmtChosen==='render' ? 'render-sm' : fmtUse);
+    payloadKey = (fmtChosen==='ui' ? 'ui-sm' : fmtChosen);
     kindHint = 'smart-money-profile-v1';
   }else if(side==='wa'){
     // Skill #14 Wallet Analysis — single-wallet deep-dive by intervals
-    fmtChosen = formatOverride || selectedFmt('wa');
-    fmtUse = (fmtChosen==='render') ? 'rendered' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || selectedFmt('wa'));
+    fmtUse = cliFormatFor('wa', fmtChosen);
     const chainWa = ($('wa_chain')?.value || 'sol');
     const walletWa = ($('wa_wallet')?.value || '').trim();
     if(!walletWa){ out.innerHTML = `<div class="render"><div class="bad">🛑 Wallet address is required.</div></div>`; return; }
@@ -3602,12 +3813,12 @@ async function runCLI(side, {formatOverride=null}={}){
     if($('wa_skip_tx')?.checked) argv.push('--skip-tx-list');
     if($('wa_skip_first')?.checked) argv.push('--skip-first-tx');
     if($('wa_skip_port')?.checked) argv.push('--skip-portfolio');
-    payloadKey = (fmtChosen==='render' ? 'render-wa' : fmtUse);
+    payloadKey = (fmtChosen==='ui' ? 'ui-wa' : fmtChosen);
     kindHint = 'wallet-analysis-v1';
   }else if(side==='rca'){
     // Skill #17b RugCheck Audit standalone — flow sẵn: 24h liq, top20 holders YES, render UI
-    fmtChosen = formatOverride || 'render';
-    fmtUse = (fmtChosen==='render') ? 'raw-json' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || 'ui');
+    fmtUse = cliFormatFor('rca', fmtChosen);
     const addrR = ($('rca_address')?.value || window.STATE.selection?.addr || '').trim();
     const chainR = $('rca_chain')?.value || 'sol';
     const liqWin = '24h';
@@ -3620,13 +3831,13 @@ async function runCLI(side, {formatOverride=null}={}){
       '--rug-holders-top-n', String(hN),
       '--format', fmtUse];
     if(!showHolders) argv.push('--no-rug-show-holders');
-    payloadKey = (fmtChosen==='render' ? 'render-rca' : fmtUse);
+    payloadKey = (fmtChosen==='ui' ? 'ui-rca' : fmtChosen);
     kindHint = 'rugcheck-audit';
   }else if(side==='stc'){
     // Skill #6 · Spam Token Cleaner (stc) — script="stc" not birdeye_cli.
     script = 'stc';
-    fmtChosen = formatOverride || selectedFmt('stc');
-    fmtUse = (fmtChosen==='render') ? 'rendered' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || selectedFmt('stc'));
+    fmtUse = cliFormatFor('stc', fmtChosen);
     const minMc = Number($('stc_min_mc')?.value || 1e9);
     const maxVol = Number($('stc_max_vol')?.value || 50);
     const chains = ($('stc_chains')?.value || 'solana').trim();
@@ -3638,7 +3849,7 @@ async function runCLI(side, {formatOverride=null}={}){
       '--max-tokens', String(Math.round(maxTokens)),
       '--format', fmtUse
     ];
-    payloadKey = (fmtChosen==='render') ? 'render-stc' : fmtUse;
+    payloadKey = (fmtChosen==='ui') ? 'ui-stc' : fmtChosen;
     kindHint = 'stc';
   }else if(side==='wallet_score'){
     // Skill #13 Wallet Score — birdeye_cli wallet-score subcommand
@@ -3654,15 +3865,15 @@ async function runCLI(side, {formatOverride=null}={}){
     const skipPf   = !!$('ws_skip_portfolio')?.checked;
     const incStyle = !!$('ws_include_style')?.checked;
     if(!addrW){ out.innerHTML = `<div class="render"><div class="bad">🛑 Wallet address is required. Paste it in the Skill #13 Wallet Score panel.</div></div>`; return; }
-    fmtChosen = formatOverride || selectedFmt('wallet_score');
-    fmtUse = (fmtChosen==='render') ? 'rendered' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || selectedFmt('wallet_score'));
+    fmtUse = cliFormatFor('wallet_score', fmtChosen);
     argv = ['--nocache', 'wallet-score', '--chain', chainW, '--wallet', addrW,
       '--duration', durationW, '--pnl-method', methodW, '--format', fmtUse];
     if(skipRug) argv.push('--skip-rug');
     if(skipFTx) argv.push('--skip-first-tx');
     if(skipPf)  argv.push('--skip-portfolio');
     if(incStyle) argv.push('--include-style');
-    payloadKey = (fmtChosen==='render') ? 'render-wallet-score' : fmtUse;
+    payloadKey = (fmtChosen==='ui') ? 'ui-wallet-score' : fmtChosen;
     kindHint = 'wallet-score';
   }else if(side==='wallet_style'){
     // Skill #11 Wallet Style — birdeye_cli wallet-style subcommand
@@ -3674,13 +3885,13 @@ async function runCLI(side, {formatOverride=null}={}){
     const skipTxListWS = !!$('wst_skip_tx_list')?.checked;
     const skipFTxWS  = !!$('wst_skip_first_tx')?.checked;
     if(!addrWS){ out.innerHTML = `<div class="render"><div class="bad">🛑 Wallet address is required. Paste it in the Skill #11 Wallet Style panel.</div></div>`; return; }
-    fmtChosen = formatOverride || selectedFmt('wallet_style');
-    fmtUse = (fmtChosen==='render') ? 'rendered' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || selectedFmt('wallet_style'));
+    fmtUse = cliFormatFor('wallet_style', fmtChosen);
     argv = ['--nocache', 'wallet-style', '--chain', chainWS, '--wallet', addrWS,
       '--duration', durationWS, '--pnl-method', methodWS, '--format', fmtUse];
     if(skipTxListWS) argv.push('--skip-tx-list');
     if(skipFTxWS)  argv.push('--skip-first-tx');
-    payloadKey = (fmtChosen==='render') ? 'render-wallet-style' : fmtUse;
+    payloadKey = (fmtChosen==='ui') ? 'ui-wallet-style' : fmtChosen;
     kindHint = 'wallet-style-v1';
   }else if(side==='kline_pattern'){
     // Skill #21 Kline Pattern — birdeye_cli kline-pattern subcommand
@@ -3690,11 +3901,11 @@ async function runCLI(side, {formatOverride=null}={}){
     const resKP = $('kp_resolution')?.value || '15m';
     const winKP = $('kp_window')?.value || '7d';
     if(!addrKP){ out.innerHTML = `<div class="render"><div class="bad">🛑 Token address is required. Paste it in the Skill #21 Kline Pattern panel.</div></div>`; return; }
-    fmtChosen = formatOverride || selectedFmt('kline_pattern');
-    fmtUse = (fmtChosen==='render') ? 'rendered' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || selectedFmt('kline_pattern'));
+    fmtUse = cliFormatFor('kline_pattern', fmtChosen);
     argv = ['--nocache', 'kline-pattern', '--chain', chainKP, '--address', addrKP,
       '--resolution', resKP, '--window', winKP, '--format', fmtUse];
-    payloadKey = (fmtChosen==='render') ? 'render-kline-pattern' : fmtUse;
+    payloadKey = (fmtChosen==='ui') ? 'ui-kline-pattern' : fmtChosen;
     kindHint = 'kline-pattern-v1';
   }else if(side==='trending_score'){
     // Skill #22 Token Trending Score — birdeye_cli token-trending-score subcommand
@@ -3703,11 +3914,11 @@ async function runCLI(side, {formatOverride=null}={}){
     const chainTS = $('ts_chain')?.value || 'sol';
     const candlesTS = $('ts_candles')?.value || '5000';
     if(!addrTS){ out.innerHTML = `<div class="render"><div class="bad">🛑 Token address is required. Paste it in the Skill #22 Token Trending Score panel.</div></div>`; return; }
-    fmtChosen = formatOverride || selectedFmt('trending_score');
-    fmtUse = (fmtChosen==='render') ? 'rendered' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || selectedFmt('trending_score'));
+    fmtUse = cliFormatFor('trending_score', fmtChosen);
     argv = ['token-trending-score', '--chain', chainTS, '--address', addrTS,
       '--candles', candlesTS, '--format', fmtUse];
-    payloadKey = (fmtChosen==='render') ? 'render-trending-score' : fmtUse;
+    payloadKey = (fmtChosen==='ui') ? 'ui-trending-score' : fmtChosen;
     kindHint = 'token-trending-score-v1';
   }else if(side==='contract_dd'){
     // Skill #5 Contract DD — birdeye_cli contract-dd subcommand
@@ -3716,11 +3927,11 @@ async function runCLI(side, {formatOverride=null}={}){
     const chainCDD = $('cdd_chain')?.value || 'sol';
     const skipKlineCDD = !!$('cdd_skip_kline')?.checked;
     if(!addrCDD){ out.innerHTML = `<div class="render"><div class="bad">🛑 Token address is required. Paste it in the Skill #5 Contract DD panel.</div></div>`; return; }
-    fmtChosen = formatOverride || selectedFmt('contract_dd');
-    fmtUse = (fmtChosen==='render') ? 'rendered' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || selectedFmt('contract_dd'));
+    fmtUse = cliFormatFor('contract_dd', fmtChosen);
     argv = ['--nocache', 'contract-dd', '--chain', chainCDD, '--address', addrCDD, '--format', fmtUse];
     if(skipKlineCDD) argv.push('--skip-kline');
-    payloadKey = (fmtChosen==='render' ? 'render-contract-dd' : fmtUse);
+    payloadKey = (fmtChosen==='ui' ? 'ui-contract-dd' : fmtChosen);
     kindHint = 'contract-dd-v1';
   }else if(side==='junk_predict'){
     script = 'birdeye_cli';
@@ -3728,18 +3939,18 @@ async function runCLI(side, {formatOverride=null}={}){
     const tokensRaw = ($('junk_tokens')?.value || '').trim();
     const tokens = tokensRaw ? tokensRaw.split(/[\s,]+/).filter(Boolean).join(',') : '';
     if(!tokens){ out.innerHTML = `<div class="render"><div class="bad">🛑 Paste at least one token address.</div></div>`; return; }
-    fmtChosen = formatOverride || selectedFmt('junk');
-    fmtUse = (fmtChosen==='render') ? 'rendered' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || selectedFmt('junk'));
+    fmtUse = cliFormatFor('junk_predict', fmtChosen);
     argv = ['junk-predict', '--chain', chainJ, '--tokens', tokens, '--format', fmtUse];
-    payloadKey = (fmtChosen==='render' ? 'render-junk' : fmtUse);
+    payloadKey = (fmtChosen==='ui' ? 'ui-junk' : fmtChosen);
     kindHint = 'junk-predict-v1';
   }else if(side==='junk_quick_test'){
     script = 'birdeye_cli';
     const chainQ = $('junk_chain')?.value || 'sol';
-    fmtChosen = formatOverride || selectedFmt('junk');
-    fmtUse = (fmtChosen==='render') ? 'rendered' : fmtChosen;
+    fmtChosen = canonFormat(formatOverride || selectedFmt('junk'));
+    fmtUse = cliFormatFor('junk_quick_test', fmtChosen);
     argv = ['junk-quick-test', '--chain', chainQ, '--num', '30', '--format', fmtUse];
-    payloadKey = (fmtChosen==='render' ? 'render-junk' : fmtUse);
+    payloadKey = (fmtChosen==='ui' ? 'ui-junk' : fmtChosen);
     kindHint = 'junk-quick-test-v1';
   }else{
     out.innerHTML = `<div class="render"><div class="warn">Skill ${side} WIP.</div></div>`; return;
@@ -3759,29 +3970,29 @@ async function runCLI(side, {formatOverride=null}={}){
       stdoutClean = stdoutClean.substring(m[0].length);
     }
     // If CLI raw-json mode had runId inside envelope, try that too as fallback
-    if(!runId && payloadKey && (payloadKey==='render-tl' || payloadKey==='render-sm' || fmtUse==='raw-json')){
+    if(!runId && payloadKey && (payloadKey==='ui-tl' || payloadKey==='ui-sm' || fmtUse==='raw-json')){
       try{
         const env = typeof j.stdout === 'string' ? JSON.parse(j.stdout) : j.stdout;
         if(env && env.runId){ runId = env.runId; cuTotal = cuTotal ?? env.cu_used_total ?? null; }
       }catch(_){}
     }
     // Store STATE.lastRun for 0-CU format switch
-    const fmtChosenNow = formatOverride || selectedFmt(side);
+    const fmtChosenNow = canonFormat(formatOverride || selectedFmt(side));
     window.__lastFmtCu = cuTotal || window.__lastFmtCu || 0;
     if(runId){
       window.STATE.lastRun = { runId, side, kind: kindHint, cu_used_total: cuTotal, lastFmt: fmtChosenNow, script, argv: [...argv] };
     }
     let bodyBlock;
-    if(payloadKey==='render-tl'){
+    if(payloadKey==='ui-tl'){
       let p = stdoutClean; try{p = JSON.parse(stdoutClean);}catch(e){}
       // Raw-json envelope may be {runId, payload: {...}}
       const actualPayload = (p && p.payload && p.payload.rows) ? p.payload : p;
       const src = Array.isArray(argv)? (argv.includes('v3-list')?'v3-list':'trending') : 'trending';
       bodyBlock = makeTrendRender(actualPayload, src) +
         `<div style="margin-top:10px"><div class="section-title" style="margin-bottom:4px">CLI stdout</div><pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre></div>`;
-    }else if(payloadKey==='render-dd'){
+    }else if(payloadKey==='ui-dd'){
       bodyBlock = makeDDRender(stdoutClean);
-    }else if(payloadKey==='render-sm'){
+    }else if(payloadKey==='ui-sm'){
       // Skill #9 · Smart Money Profile rendered output. JSON envelope {html, profile, ...}.
       let parsed = null;
       try{ if(stdoutClean && typeof stdoutClean === 'string' && /^\s*\{/.test(stdoutClean)) parsed = JSON.parse(stdoutClean); }catch(_){}
@@ -3792,7 +4003,7 @@ async function runCLI(side, {formatOverride=null}={}){
       }else{
         bodyBlock = `<pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre>`;
       }
-    }else if(payloadKey==='render-wa'){
+    }else if(payloadKey==='ui-wa'){
       // Skill #14 · Wallet Analysis rendered output. JSON envelope {html, profile, assets, ...}.
       let parsed = null;
       try{ if(stdoutClean && typeof stdoutClean === 'string' && /^\s*\{/.test(stdoutClean)) parsed = JSON.parse(stdoutClean); }catch(_){}
@@ -3803,7 +4014,7 @@ async function runCLI(side, {formatOverride=null}={}){
       }else{
         bodyBlock = `<pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre>`;
       }
-    }else if(payloadKey==='render-rca'){
+    }else if(payloadKey==='ui-rca'){
       // Skill #17b RugCheck Audit UI = same same rugcheck.xyz layout = 5 tabs.
       let p = stdoutClean; try{p = JSON.parse(stdoutClean);}catch(e){}
       const payload = (p && p.payload) ? p.payload : (p && p.overview ? p : null);
@@ -3813,7 +4024,7 @@ async function runCLI(side, {formatOverride=null}={}){
       }else{
         bodyBlock = `<div class="render"><div class="warn">⚠ Unable to parse RugCheck payload → fallback render as DD scorecard (showing raw stdout)</div></div>${makeDDRender(stdoutClean)}`;
       }
-    }else if(payloadKey==='render-stc'){
+    }else if(payloadKey==='ui-stc'){
       // Skill #6 · Spam Token Cleaner rendered output.
       // stc.py --format rendered may return: (a) JSON envelope with rows + html, (b) raw HTML string <div class=render-stc>, or (c) plain text.
       let parsed = null;
@@ -3832,7 +4043,7 @@ async function runCLI(side, {formatOverride=null}={}){
       }else{
         bodyBlock = `<pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre>`;
       }
-    }else if(payloadKey==='render-wallet-score'){
+    }else if(payloadKey==='ui-wallet-score'){
       // Skill #13 · Wallet Score rendered output. JSON envelope {html, metrics, components, step_checks, alpha_score, tier, wallet_info, cu_breakdown}.
       let parsed = null;
       try{ if(stdoutClean && typeof stdoutClean === 'string' && /^\s*\{/.test(stdoutClean)) parsed = JSON.parse(stdoutClean); }catch(_){}
@@ -3856,7 +4067,7 @@ async function runCLI(side, {formatOverride=null}={}){
           bodyBlock = `<pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre>`;
         }
       }
-    }else if(payloadKey==='render-wallet-style'){
+    }else if(payloadKey==='ui-wallet-style'){
       // Skill #11 · Wallet Style rendered output. JSON envelope {html, main_title, freq, pnl_level, badges, metrics, ...}.
       let parsed = null;
       try{ if(stdoutClean && typeof stdoutClean === 'string' && /^\s*\{/.test(stdoutClean)) parsed = JSON.parse(stdoutClean); }catch(_){}
@@ -3878,7 +4089,7 @@ async function runCLI(side, {formatOverride=null}={}){
           bodyBlock = `<pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre>`;
         }
       }
-    }else if(payloadKey==='render-kline-pattern'){
+    }else if(payloadKey==='ui-kline-pattern'){
       // Skill #21 · Kline Pattern rendered output. JSON envelope {html, pattern, score, measurements, label, color}.
       let parsed = null;
       try{ if(stdoutClean && typeof stdoutClean === 'string' && /^\s*\{/.test(stdoutClean)) parsed = JSON.parse(stdoutClean); }catch(_){}
@@ -3899,7 +4110,7 @@ async function runCLI(side, {formatOverride=null}={}){
           bodyBlock = `<pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre>`;
         }
       }
-    }else if(payloadKey==='render-trending-score'){
+    }else if(payloadKey==='ui-trending-score'){
       // Skill #22 · Token Trending Score rendered output. JSON envelope {html, overall_trending_score, intervals, ...}.
       let parsed = null;
       try{ if(stdoutClean && typeof stdoutClean === 'string' && /^\s*\{/.test(stdoutClean)) parsed = JSON.parse(stdoutClean); }catch(_){}
@@ -3919,7 +4130,7 @@ async function runCLI(side, {formatOverride=null}={}){
           bodyBlock = `<pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre>`;
         }
       }
-    }else if(payloadKey==='render-contract-dd'){
+    }else if(payloadKey==='ui-contract-dd'){
       // Skill #5 · Contract DD rendered output. JSON envelope {html, composite, tier, safety_score, ...}.
       let parsed = null;
       try{ if(stdoutClean && typeof stdoutClean === 'string' && /^\s*\{/.test(stdoutClean)) parsed = JSON.parse(stdoutClean); }catch(_){}
@@ -3940,7 +4151,7 @@ async function runCLI(side, {formatOverride=null}={}){
           bodyBlock = `<pre class="out_body">${htmlEscape(stdoutClean||'')}${j.stderr?`\n\n---- stderr ----\n${htmlEscape(j.stderr)}`:''}</pre>`;
         }
       }
-    }else if(payloadKey==='render-junk'){
+    }else if(payloadKey==='ui-junk'){
       // Skill #32 · Junk Token Prediction rendered output. JSON envelope {html, results, threshold, n_junk, ...}.
       let parsed = null;
       try{ if(stdoutClean && typeof stdoutClean === 'string' && /^\s*\{/.test(stdoutClean)) parsed = JSON.parse(stdoutClean); }catch(_){}
@@ -3962,7 +4173,8 @@ async function runCLI(side, {formatOverride=null}={}){
     }
     const fmtBarHtmlOut = runId ? fmtButtonsHtml(fmtChosenNow, runId, kindHint) : '';
     const cuChipText = cuTotal != null ? `⚡CU: ${cuTotal}` : '⚡CU · see inside footer';
-    out.innerHTML = `${fmtBarHtmlOut}
+    out.innerHTML = `${paramsSummaryHtml(argv)}
+      ${fmtBarHtmlOut}
       <div class="cmd" style="display:flex;align-items:center;gap:8px"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${htmlEscape(cmd)}</span><button class="btn ghost" type="button" style="padding:2px 8px;font-size:12px;flex-shrink:0" title="Copy full CLI command" onclick="const t=this.previousElementSibling.textContent;navigator.clipboard.writeText(t).then(()=>{this.textContent='✓';setTimeout(()=>this.textContent='📋',1000)})">📋</button></div>
       <div class="meta">
         <span class="chip">exit: ${j.exit}</span>
@@ -4083,5 +4295,6 @@ try {
     window.STATE.homeFilter = qs.get('filter') || 'all';
     renderHome();
   }
+  initSkillDrawer();
   await refreshKeyBox();
 })();

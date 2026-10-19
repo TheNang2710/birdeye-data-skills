@@ -2,6 +2,12 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "cleanUrls": true,
+  "rewrites": [
+    {
+      "source": "/",
+      "destination": "/test"
+    }
+  ],
   "functions": {
     "api/run.py": {
       "maxDuration": 60,

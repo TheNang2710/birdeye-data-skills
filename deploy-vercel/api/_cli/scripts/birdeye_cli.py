@@ -44,6 +44,7 @@ from modules import contract_dd as _cdd
 from modules import wallet_data as _wd
 from modules import trending_score as _ts
 from modules import junk_ml as _jml
+from modules import junk_modes as _jm
 
 BIRDEYE_BASE = "https://public-api.birdeye.so"
 CHAINS = {"sol": "solana", "bsc": "bsc", "base": "base", "eth": "ethereum", "arc": "arbitrum", "robinhood": "robinhood"}
@@ -147,7 +148,7 @@ def _serialize_dd_payload(d: dict, args) -> dict:
     out["schemaVersion"] = 1
     out["kind"] = "token-dd"
     out["params"] = {"chain": args.chain, "address": args.address}
-    out["format_renderers"] = ["render", "plain", "telegram", "raw-json"]
+    out["format_renderers"] = ["ui", "plain", "telegram", "json"]
     # keep tuples as lists
     out["price_changes"] = [[i, p] for i, p in d["price_changes"]]
     out["buy_sell_rows"] = [[i, t2, b, s2, ratio, buys, sells, tr_ratio, wal]
@@ -240,11 +241,20 @@ def _render_dd_from_cache(payload: dict, fmt: str, run_id: str):
         chain = payload["params"]["chain"]
         address = payload["params"]["address"]
 
-    if fmt == "raw-json":
+    if fmt in ("json", "raw-json"):
         print(json.dumps({
             "runId": run_id, "cached": True, "cu_used_total": 0,
             "payload": payload,
         }, ensure_ascii=False))
+    elif fmt in ("ui", "render"):
+        ui_payload = {
+            "runId": run_id,
+            "cached": True,
+            "cu_used_total": 0,
+            "payload": payload,
+            "html": _render_dd_ui_html(d, _Args(), cached=True),
+        }
+        print(json.dumps(ui_payload, ensure_ascii=False))
     elif fmt == "telegram":
         _print_dd_telegram(d, _Args())
     else:
@@ -1750,6 +1760,170 @@ def _print_dd_scorecard(d: dict, args):
     _print_dd_plain(d, args)
 
 
+def _dd_risk_chip(label: str, value: str, tone: str = "neutral") -> str:
+    palette = {
+        "good": ("rgba(34,197,94,.10)", "#86efac", "rgba(34,197,94,.22)"),
+        "warn": ("rgba(250,204,21,.10)", "#fde68a", "rgba(250,204,21,.22)"),
+        "bad": ("rgba(239,68,68,.10)", "#fca5a5", "rgba(239,68,68,.22)"),
+        "neutral": ("#0f1115", "#cbd5e1", "#202530"),
+    }
+    bg, fg, bd = palette.get(tone, palette["neutral"])
+    return (
+        f'<div style="background:{bg};border:1px solid {bd};border-radius:999px;padding:4px 10px;'
+        f'font-size:11px;color:{fg}">{html.escape(label)}: <span style="font-weight:700">{html.escape(value)}</span></div>'
+    )
+
+
+def _render_dd_ui_html(d: dict, args_ref=None, cached: bool = False) -> str:
+    sec = d.get("security") or {}
+    sm = d.get("smart_money") or {}
+    sc = d.get("scores") or {}
+    chain = (getattr(args_ref, "chain", None) or d.get("params", {}).get("chain") or d.get("chain") or "").upper()
+    symbol = d.get("symbol") or "?"
+    name = d.get("name") or symbol
+    address = d.get("address") or ""
+    price = d.get("price_usd")
+    verdict = sc.get("verdict") or "N/A"
+    final_score = sc.get("final")
+
+    def tone_score(v):
+        if not isinstance(v, (int, float)):
+            return "neutral"
+        if v >= 8:
+            return "good"
+        if v >= 5:
+            return "warn"
+        return "bad"
+
+    def tone_low_good(v, ok, warn):
+        if not isinstance(v, (int, float)):
+            return "neutral"
+        if v < ok:
+            return "good"
+        if v < warn:
+            return "warn"
+        return "bad"
+
+    dev = sec.get("dev_holding_pct")
+    top10 = sec.get("top10_holder_pct")
+    honeypot = sec.get("honeypot")
+    lp_locked = sec.get("lp_locked")
+    price_changes = d.get("price_changes") or []
+    buy_sell_rows = d.get("buy_sell_rows") or []
+    mf_map = {i: mf for i, mf in (d.get("money_flow_rows") or [])}
+
+    risk_chips = [
+        _dd_risk_chip("Dev hold", f"{dev:.1f}%" if isinstance(dev, (int, float)) else "N/A", tone_low_good(dev, 2, 8)),
+        _dd_risk_chip("Top10 holders", f"{top10:.1f}%" if isinstance(top10, (int, float)) else "N/A", tone_low_good(top10, 20, 40)),
+        _dd_risk_chip("Honeypot", "YES" if honeypot else ("NO" if honeypot is False else "N/A"), "bad" if honeypot is True else ("good" if honeypot is False else "neutral")),
+        _dd_risk_chip("LP lock", "YES" if lp_locked else ("NO" if lp_locked is False else "N/A"), "good" if lp_locked is True else ("warn" if lp_locked is False else "neutral")),
+    ]
+    score_blocks = []
+    for key, label in (("sec", "Security"), ("smkt", "Smart Mkt"), ("act", "Activity"), ("vol", "Volume")):
+        val = sc.get(key)
+        tone = tone_score(val)
+        color = "#22c55e" if tone == "good" else "#facc15" if tone == "warn" else "#ef4444" if tone == "bad" else "#e6e8ef"
+        score_blocks.append(
+            f'<div style="background:#0f1115;border-radius:9px;padding:10px;text-align:center">'
+            f'<div style="font-size:10px;color:#94a3b8;text-transform:uppercase">{label}</div>'
+            f'<div style="font-size:18px;font-weight:800;color:{color};margin-top:2px">{val:.1f}/10</div>'
+            f'</div>' if isinstance(val, (int, float)) else
+            f'<div style="background:#0f1115;border-radius:9px;padding:10px;text-align:center">'
+            f'<div style="font-size:10px;color:#94a3b8;text-transform:uppercase">{label}</div>'
+            f'<div style="font-size:18px;font-weight:800;color:#e6e8ef;margin-top:2px">N/A</div></div>'
+        )
+
+    price_change_html = "".join(
+        f'<div style="background:#0f1115;border-radius:8px;padding:8px 10px;text-align:center">'
+        f'<div style="font-size:10px;color:#94a3b8;text-transform:uppercase">{html.escape(str(win))}</div>'
+        f'<div style="font-size:14px;font-weight:800;color:{"#22c55e" if isinstance(pct,(int,float)) and pct>=0 else "#ef4444" if isinstance(pct,(int,float)) else "#e6e8ef"};margin-top:2px">{_fmt_pct(pct)}</div>'
+        f'</div>'
+        for win, pct in price_changes
+    )
+
+    flow_rows_html = ""
+    for (i, total_vol, buy_vol, sell_vol, buy_ratio, buys, sells, trade_buy_ratio, wallets) in buy_sell_rows[:5]:
+        flow_rows_html += (
+            f'<tr>'
+            f'<td style="padding:7px 8px;color:#cbd5e1">{html.escape(str(i))}</td>'
+            f'<td style="padding:7px 8px;color:#e6e8ef">{_fmt_usd(total_vol)}</td>'
+            f'<td style="padding:7px 8px;color:#e6e8ef">{("N/A" if buy_ratio is None else f"{buy_ratio*100:.0f}%")}</td>'
+            f'<td style="padding:7px 8px;color:#e6e8ef">{("N/A" if trade_buy_ratio is None else f"{trade_buy_ratio*100:.0f}%")}</td>'
+            f'<td style="padding:7px 8px;color:#e6e8ef">{_fmt_usd(mf_map.get(i))}</td>'
+            f'<td style="padding:7px 8px;color:#94a3b8">{int(wallets):,}</td>'
+            f'</tr>'
+        )
+    if not flow_rows_html:
+        flow_rows_html = '<tr><td colspan="6" style="padding:10px 8px;color:#94a3b8">No buy/sell pressure rows.</td></tr>'
+
+    sm_text = "Request failed"
+    if sm.get("batch_join_success") and sm.get("smart_traders_no") is None:
+        sm_text = "Not in smart-money top 100 today"
+    elif isinstance(sm.get("smart_traders_no"), (int, float)):
+        sm_text = f'{int(sm["smart_traders_no"]):,} wallets'
+        if sm.get("rank_in_sm_top100"):
+            sm_text += f' · rank #{int(sm["rank_in_sm_top100"])}/100'
+
+    final_color = "#22c55e" if isinstance(final_score, (int, float)) and final_score >= 8 else "#facc15" if isinstance(final_score, (int, float)) and final_score >= 5 else "#ef4444"
+    verdict_chip = _dd_risk_chip("Verdict", str(verdict), "good" if verdict == "BUY" else "warn" if verdict in {"WATCH", "NEUTRAL"} else "bad")
+    cached_chip = ""
+    if cached:
+        cached_chip = f'<div style="font-size:10px;color:#64748b;margin-top:8px">💾 Cached run · Original API cost ⚡{int(d.get("cu_used_total") or 0)} CU · Re-render = 0 CU</div>'
+
+    return f'''<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0a0e1a;color:#e2e8f0;padding:16px;border-radius:12px;max-width:820px">
+  <div style="display:flex;justify-content:space-between;gap:16px;align-items:flex-start;margin-bottom:14px">
+    <div style="min-width:0">
+      <div style="font-size:20px;font-weight:800;color:#e6e8ef">🔍 Token DD</div>
+      <div style="font-size:12px;color:#94a3b8;margin-top:2px">{html.escape(chain)} · {html.escape(symbol)} · {html.escape(name)}</div>
+      <div style="font-size:11px;color:#64748b;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:4px">{html.escape(address)}</div>
+    </div>
+    <div style="text-align:right;flex-shrink:0">
+      <div style="font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:.34px">Final DD Score</div>
+      <div style="font-size:30px;font-weight:900;color:{final_color}">{f"{final_score:.1f}/10" if isinstance(final_score,(int,float)) else "N/A"}</div>
+      {verdict_chip}
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px">
+    <div style="background:#0f1115;border-radius:9px;padding:10px;text-align:center"><div style="font-size:10px;color:#94a3b8;text-transform:uppercase">Price</div><div style="font-size:15px;font-weight:800;color:#e6e8ef;margin-top:2px">{_fmt_usd(price)}</div></div>
+    <div style="background:#0f1115;border-radius:9px;padding:10px;text-align:center"><div style="font-size:10px;color:#94a3b8;text-transform:uppercase">MCap</div><div style="font-size:15px;font-weight:800;color:#e6e8ef;margin-top:2px">{_fmt_usd(d.get("marketcap_usd"))}</div></div>
+    <div style="background:#0f1115;border-radius:9px;padding:10px;text-align:center"><div style="font-size:10px;color:#94a3b8;text-transform:uppercase">Liquidity</div><div style="font-size:15px;font-weight:800;color:#e6e8ef;margin-top:2px">{_fmt_usd(d.get("liquidity_usd"))}</div></div>
+    <div style="background:#0f1115;border-radius:9px;padding:10px;text-align:center"><div style="font-size:10px;color:#94a3b8;text-transform:uppercase">FDV</div><div style="font-size:15px;font-weight:800;color:#e6e8ef;margin-top:2px">{_fmt_usd(d.get("fdv_usd"))}</div></div>
+    <div style="background:#0f1115;border-radius:9px;padding:10px;text-align:center"><div style="font-size:10px;color:#94a3b8;text-transform:uppercase">Holders</div><div style="font-size:15px;font-weight:800;color:#e6e8ef;margin-top:2px">{f"{int(d['holder_count']):,}" if isinstance(d.get("holder_count"), (int,float)) else "N/A"}</div></div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px">{''.join(risk_chips)}</div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:12px">{''.join(score_blocks)}</div>
+  <div style="background:#0f1115;border-radius:10px;padding:12px;margin-bottom:12px">
+    <div style="font-size:12px;font-weight:700;color:#e6e8ef;margin-bottom:8px">Price Action</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(92px,1fr));gap:8px">{price_change_html or '<div style="font-size:12px;color:#94a3b8">No price windows.</div>'}</div>
+  </div>
+  <div style="display:grid;grid-template-columns:minmax(0,1.3fr) minmax(240px,.7fr);gap:12px">
+    <div style="background:#0f1115;border-radius:10px;padding:12px">
+      <div style="font-size:12px;font-weight:700;color:#e6e8ef;margin-bottom:8px">Buy / Sell Pressure</div>
+      <div style="overflow:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead><tr style="color:#94a3b8;text-align:left"><th style="padding:0 8px 6px">Win</th><th style="padding:0 8px 6px">Vol</th><th style="padding:0 8px 6px">Buy%</th><th style="padding:0 8px 6px">Trade B%</th><th style="padding:0 8px 6px">Net Flow</th><th style="padding:0 8px 6px">Wallets</th></tr></thead>
+          <tbody>{flow_rows_html}</tbody>
+        </table>
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div style="background:#0f1115;border-radius:10px;padding:12px">
+        <div style="font-size:12px;font-weight:700;color:#e6e8ef;margin-bottom:6px">Smart Money</div>
+        <div style="font-size:18px;font-weight:800;color:#e6e8ef">{html.escape(sm_text)}</div>
+      </div>
+      <div style="background:#0f1115;border-radius:10px;padding:12px">
+        <div style="font-size:12px;font-weight:700;color:#e6e8ef;margin-bottom:6px">Run Snapshot</div>
+        <div style="font-size:12px;color:#cbd5e1">⚡CU cost: {int(d.get("cu_used_total") or 0)}</div>
+        <div style="font-size:12px;color:#cbd5e1;margin-top:4px">⏱ {int(d.get("latency_ms") or 0)} ms</div>
+        <div style="font-size:12px;color:#94a3b8;margin-top:4px">{html.escape(str(d.get("snapshot_time") or ""))}</div>
+        {cached_chip}
+      </div>
+    </div>
+  </div>
+  <div style="font-size:10px;color:#475569;margin-top:10px">⚡CU cost: {int(d.get("cu_used_total") or 0)} ({html.escape(str(d.get("cu_breakdown") or ""))})</div>
+</div>'''
+
+
 def _tier_from_rugrisk(risk_score_100: float, honeypot=None, mint_enabled=None) -> str:
     # RugCheck-tier mapping: SAFE / LOW / CAUTION / ELEVATED / HIGH / VERY HIGH / DANGER
     if honeypot is True or mint_enabled is True:
@@ -2133,7 +2307,17 @@ def cmd_dd(args):
     if not key:
         print("[E] No BIRDEYE_API_KEY found.")
         return 1
-    rug_enable = (args.format == "rugcheck")
+    fmt = str(getattr(args, "format", "ui") or "ui").strip().lower()
+    if fmt in {"render", "ui", "scorecard"}:
+        fmt = "ui"
+    elif fmt in {"json", "raw-json"}:
+        fmt = "json"
+    elif fmt == "rugcheck":
+        fmt = "rugcheck"
+    else:
+        fmt = fmt or "ui"
+
+    rug_enable = (fmt == "rugcheck")
     try:
         d = _fetch_token_dd(key, args.chain, args.address, enable_rugcheck_extra=rug_enable, args_ref=args)
     except RuntimeError as e:
@@ -2146,16 +2330,20 @@ def cmd_dd(args):
         print(f"#RUN_ID {rid}\t{fp.name}\tcu={payload['cu_used_total']}")
     else:
         rid = None
-    if args.format == "raw-json" or args.format == "render":
+    if fmt == "json":
         payload = _serialize_dd_payload(d, args)
         out = {"runId": rid, "cached": False, "cu_used_total": payload["cu_used_total"], "payload": payload}
         print(json.dumps(out, ensure_ascii=False))
         return 0
-    if args.format == "rugcheck":
+    if fmt == "ui":
+        payload = _serialize_dd_payload(d, args)
+        out = {"runId": rid, "cached": False, "cu_used_total": payload["cu_used_total"], "payload": payload,
+               "html": _render_dd_ui_html(d, args)}
+        print(json.dumps(out, ensure_ascii=False))
+        return 0
+    if fmt == "rugcheck":
         _print_rugcheck(d, args)
-    elif args.format == "scorecard":
-        _print_dd_scorecard(d, args)
-    elif args.format == "telegram":
+    elif fmt == "telegram":
         _print_dd_telegram(d, args)
     else:
         _print_dd_plain(d, args)
@@ -2251,7 +2439,7 @@ def build_parser():
     pd = sub.add_parser("token-dd", help='Skill #3 — "Should I buy this token?" (typ. 71 CU)')
     pd.add_argument("--chain", choices=list(CHAINS.keys()), default="sol")
     pd.add_argument("--address", required=True, help="Token contract address")
-    pd.add_argument("--format", choices=["plain", "scorecard", "rugcheck", "telegram", "raw-json", "render"], default="plain")
+    pd.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "render", "scorecard", "rugcheck"], default="ui")
     pd.add_argument("--include", dest="include", default=None,
                     help="Comma flags: `list` (+30CU top20 holders), `advanced_security` (+21CU insider/dev/sniper/bundle tags), `risk_history` (+30CU 30d MC snapshots). `rugcheck` format auto-picks best CU-min set")
     pd.add_argument("--rug-liq-window", dest="rug_liq_window", default="24h", choices=["1h","4h","8h","24h"],
@@ -2454,7 +2642,13 @@ def build_parser():
     pj.add_argument("--chain", choices=list(CHAINS.keys()), default="sol")
     pj.add_argument("--tokens", required=True,
                     help="Comma-separated or newline-separated token addresses")
-    pj.add_argument("--format", choices=["plain", "raw-json", "rendered"], default="rendered")
+    pj.add_argument("--model", choices=["unsupervised", "function", "supervised"], default="function",
+                    help="Scoring mode: unsupervised = LR16, function = JSON heuristic, supervised = JSON GBM.")
+    pj.add_argument("--params-json", default=None,
+                    help="Optional JSON object to override Function or Supervised params at runtime.")
+    pj.add_argument("--include", default=None,
+                    help="Optional include flags. Supported: holding_distribution")
+    pj.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered"], default="ui")
     pj.set_defaults(func=cmd_junk_predict)
 
     pjq = sub.add_parser("junk-quick-test",
@@ -2475,7 +2669,7 @@ def build_parser():
     pjq.add_argument("--max-liquidity", type=float, default=None)
     pjq.add_argument("--min-market-cap", type=float, default=None)
     pjq.add_argument("--max-market-cap", type=float, default=None)
-    pjq.add_argument("--format", choices=["plain", "raw-json", "rendered"], default="rendered")
+    pjq.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered"], default="ui")
     pjq.set_defaults(func=cmd_junk_quick_test)
 
     return p
@@ -9080,9 +9274,34 @@ def cmd_junk_predict(args):
     """
     chain = args.chain
     raw_tokens = (args.tokens or "").strip()
-    fmt = args.format
-    # Threshold is decided by the model (lr_params.json), not by the user.
-    threshold = float(_jml._get_model().get("threshold", 95.0))
+    fmt = str(getattr(args, "format", "ui") or "ui").strip().lower()
+    if fmt in {"render", "rendered", "ui"}:
+        fmt = "ui"
+    elif fmt in {"raw-json", "json"}:
+        fmt = "json"
+    mode = _jm.normalize_mode(getattr(args, "model", None))
+    include_raw = str(getattr(args, "include", "") or "")
+    include_flags = {
+        part.strip().lower().replace(" ", "_")
+        for part in include_raw.replace("\n", ",").split(",")
+        if part.strip()
+    }
+    active_override: dict[str, Any] = {}
+    if mode in {"function", "supervised"}:
+        try:
+            active_override = _jm.parse_params_override(getattr(args, "params_json", None))
+        except Exception as e:
+            sys.stderr.write(f"[junk-predict] invalid --params-json: {e}\n")
+            return 2
+    model_payload = _jm.merge_mode_payload(mode, active_override)
+    threshold = _jm.threshold_points(mode, model_payload)
+    model_name = _jm.model_label(mode, model_payload)
+    mode_label = {
+        "unsupervised": "Unsupervised",
+        "function": "Function",
+        "supervised": "Supervised",
+    }.get(mode, mode.title())
+    want_holding = mode in {"function", "supervised"} and "holding_distribution" in include_flags
     key = _load_key()
     if not key:
         sys.stderr.write("[junk-predict] missing BIRDEYE_API_KEY.\n")
@@ -9104,17 +9323,89 @@ def cmd_junk_predict(args):
     cu = 0
     breakdown_cu: list[str] = []
     results: list[dict] = []
+    overview_calls = 0
+    holder_dist_calls = 0
+
+    HOLDING_TOP1_SUSP_PCT = 99.0
+    HOLDING_TOP3_EXCLUDE_PCT = 99.5
+    HOLDING_TOP_MIN_PCT = 0.1
+    HOLDING_TOP5_MIN_PCT = 0.05
+
+    def _fetch_holder_distribution(session: requests.Session, address: str) -> dict[str, float] | None:
+        dist_raw, _ms = _be(
+            session,
+            key,
+            chain,
+            "/holder/v1/distribution",
+            {
+                "address_type": "wallet",
+                "mode": "top",
+                "top_n": 10,
+                "include_list": "true",
+                "limit": 10,
+                "token_address": address,
+            },
+        )
+        holders = (((dist_raw or {}).get("data") or {}).get("holders") or [])
+        pcts: list[float] = []
+        for holder in holders[:10]:
+            val = _jml._to_float(holder.get("percentOfSupply"))
+            if val is None:
+                val = _jml._to_float(holder.get("percent_of_supply"))
+            if val is None:
+                continue
+            pcts.append(val * 100.0 if val <= 1.0 else val)
+        if not pcts:
+            return None
+        return {
+            "top1_pct": round(sum(pcts[:1]), 6),
+            "top3_pct": round(sum(pcts[:3]), 6),
+            "top4_pct": round(sum(pcts[:4]), 6),
+            "top5_pct": round(sum(pcts[:5]), 6),
+            "top10_pct": round(sum(pcts[:10]), 6),
+        }
+
+    def _holding_rule_alerts(row: dict[str, Any]) -> dict[str, Any]:
+        top1 = _jml._to_float(row.get("top1_pct"))
+        top3 = _jml._to_float(row.get("top3_pct"))
+        top4 = _jml._to_float(row.get("top4_pct"))
+        top5 = _jml._to_float(row.get("top5_pct"))
+        reasons: list[str] = []
+        tags: list[str] = []
+        if top1 is not None and top1 >= HOLDING_TOP1_SUSP_PCT:
+            tags.append("Top1 concentration")
+            reasons.append(f"top1 {top1:.3f}% >= {HOLDING_TOP1_SUSP_PCT:.1f}%")
+        if top3 is not None and top3 > HOLDING_TOP3_EXCLUDE_PCT:
+            tags.append("Top3 illiquid")
+            reasons.append(f"top3 {top3:.3f}% > {HOLDING_TOP3_EXCLUDE_PCT:.1f}%")
+        dust_parts: list[str] = []
+        if top3 is not None and top3 < HOLDING_TOP_MIN_PCT:
+            dust_parts.append(f"top3 {top3:.3f}%")
+        if top4 is not None and top4 < HOLDING_TOP_MIN_PCT:
+            dust_parts.append(f"top4 {top4:.3f}%")
+        if top5 is not None and top5 < HOLDING_TOP5_MIN_PCT:
+            dust_parts.append(f"top5 {top5:.3f}%")
+        if dust_parts:
+            tags.append("Dust holders")
+            reasons.append("dust holders (" + ", ".join(dust_parts) + ")")
+        return {
+            "triggered": bool(reasons),
+            "tags": tags,
+            "reasons": reasons,
+            "exclude_by_top1": bool(top1 is not None and top1 >= HOLDING_TOP1_SUSP_PCT),
+            "exclude_by_top3": bool(top3 is not None and top3 > HOLDING_TOP3_EXCLUDE_PCT),
+            "exclude_by_low_conc": bool(dust_parts),
+        }
 
     for addr in addresses:
-        entry: dict = {"address": addr, "symbol": "", "name": "", "error": None}
+        entry: dict[str, Any] = {"address": addr, "symbol": "", "name": "", "error": None}
         try:
             with requests.Session() as s:
                 ov_raw, _ms = _be(s, key, chain, "/defi/token_overview",
                                   {"address": addr})
             ovd = (ov_raw.get("data") if isinstance(ov_raw, dict) else {}) or {}
             cu += 21
-            if not breakdown_cu or "overview=21" not in breakdown_cu[-1]:
-                pass
+            overview_calls += 1
             entry["symbol"] = ovd.get("symbol") or ""
             entry["name"] = ovd.get("name") or entry["symbol"] or addr[:12]
             entry["mcap"] = _jml._to_float(ovd.get("marketCap"))
@@ -9136,31 +9427,65 @@ def cmd_junk_predict(args):
             entry["number_markets"] = _jml._to_float(ovd.get("numberMarkets"))
             entry["price_change_24h_pct"] = _jml._to_float(ovd.get("priceChange24hPercent"))
             entry["vol_change_24h_pct"] = _jml._to_float(ovd.get("v24hChangePercent"))
-
-            pred = _jml.predict(
-                mcap=entry["mcap"], fdv=entry["fdv"],
-                liquidity=entry["liquidity"], vol_24h=entry["vol_24h"],
-                tx_24h=entry["tx_24h"], trader_24h=entry["trader_24h"],
-                threshold=threshold,
-            )
+            raw_token: dict[str, Any] = {
+                "chain": CHAINS.get(chain, chain),
+                "mcap_usd": entry["mcap"],
+                "fdv_usd": entry["fdv"],
+                "liquidity_usd": entry["liquidity"],
+                "vol_24h_usd": entry["vol_24h"],
+                "tx_24h": entry["tx_24h"],
+                "trader_24h": entry["trader_24h"],
+                "holder_count": entry["holder"],
+                "price_change_24h": entry["price_change_24h_pct"],
+                "vol_30d_usd": None,
+            }
+            if want_holding:
+                try:
+                    with requests.Session() as s:
+                        dist = _fetch_holder_distribution(s, addr)
+                    if dist:
+                        raw_token.update(dist)
+                        entry.update(dist)
+                    cu += 30
+                    holder_dist_calls += 1
+                except Exception:
+                    entry["holding_distribution_error"] = "holder distribution unavailable"
+            pred = _jm.score_token(raw_token, mode=mode, params_override=active_override)
             entry["junk_score"] = pred["score"]
             entry["is_junk"] = pred["is_junk"]
-            entry["features"] = pred["features"]
+            entry["threshold"] = pred.get("threshold", threshold)
+            entry["mode"] = pred.get("mode", mode)
+            entry["model_name"] = model_name
+            entry["proba"] = pred.get("proba")
+            entry["parts"] = pred.get("parts")
+            entry["healthy_guard"] = pred.get("healthy_guard")
+            entry["alive_guard"] = pred.get("alive_guard")
+            entry["suspicious"] = pred.get("suspicious")
+            entry["price_suspicious"] = pred.get("price_suspicious")
+            entry["holding_suspicious"] = pred.get("holding_suspicious")
+            entry["shared_metrics"] = pred.get("shared_metrics") or {}
+            entry["min_risk_floor_reason"] = pred.get("min_risk_floor_reason")
+            entry["min_risk_floor_applied"] = pred.get("min_risk_floor_applied")
+            entry["holding_rule_alerts"] = _holding_rule_alerts(entry) if want_holding else {"triggered": False, "tags": [], "reasons": []}
         except Exception as e:
             entry["error"] = str(e)[:200]
             entry["junk_score"] = None
             entry["is_junk"] = None
         results.append(entry)
 
-    breakdown_cu.append(f"overview=21x{len(addresses)}")
+    breakdown_cu.append(f"overview=21x{overview_calls}")
+    if holder_dist_calls:
+        breakdown_cu.append(f"holder_distribution=30x{holder_dist_calls}")
 
     run_id = f"junk_{chain}_{int(time.time())}"
 
     # ── Format: plain ──
     if fmt == "plain":
         print(f"Skill #23 · Junk Token Prediction — {chain.upper()}")
-        print(f"Threshold: {threshold}/100")
-        print(f"{'#':>3} {'Symbol':<12} {'Score':>7} {'Junk?':>7} {'MCap':>12} {'Liq':>12} {'Vol24h':>12} {'Tx24h':>8} {'Trader':>8}")
+        print(f"Mode: {mode_label} · {model_name}")
+        if want_holding:
+            print("Include: holding_distribution")
+        print(f"{'#':>3} {'Symbol':<12} {'JunkProb':>8} {'Verdict':>8} {'MCap':>12} {'Liq':>12} {'Vol24h':>12} {'Tx24h':>8} {'Trader':>8}")
         print("-" * 95)
         for i, r in enumerate(results, 1):
             if r.get("error"):
@@ -9168,14 +9493,38 @@ def cmd_junk_predict(args):
                 continue
             sym = (r.get("symbol") or "?")[:12]
             sc = f"{r['junk_score']:.1f}" if r["junk_score"] is not None else "N/A"
-            junk = "JUNK" if r.get("is_junk") else "ok"
+            junk = "JUNK" if r.get("is_junk") else "OK"
             mc = _fmt_usd(r.get("mcap"))
             liq = _fmt_usd(r.get("liquidity"))
             vol = _fmt_usd(r.get("vol_24h"))
             tx = f"{int(r['tx_24h']):,}" if r.get("tx_24h") is not None else "N/A"
             tr = f"{int(r['trader_24h']):,}" if r.get("trader_24h") is not None else "N/A"
-            print(f"{i:>3} {sym:<12} {sc:>7} {junk:>7} {mc:>12} {liq:>12} {vol:>12} {tx:>8} {tr:>8}")
+            print(f"{i:>3} {sym:<12} {sc:>8} {junk:>8} {mc:>12} {liq:>12} {vol:>12} {tx:>8} {tr:>8}")
         print(f"\n⚡CU: {cu} ({', '.join(breakdown_cu)})")
+        return 0
+    if fmt == "telegram":
+        lines = [
+            f"🗑️ Junk Token Prediction",
+            f"Chain: {chain.upper()} · Mode: {mode_label}",
+            f"Model: {model_name}",
+        ]
+        if want_holding:
+            lines.append("Include: holding_distribution")
+        for r in results:
+            if r.get("error"):
+                lines.append(f"• {r['address'][:16]}… → ERROR: {r['error']}")
+                continue
+            verdict = "🚫 JUNK" if r.get("is_junk") else "✅ OK"
+            lines.append(
+                f"• {r.get('name') or r.get('symbol') or r['address'][:12]} "
+                f"({r.get('symbol') or '?'})\n"
+                f"  Junk Probability: {r.get('junk_score', 0):.1f}/100 · {verdict}"
+            )
+            alerts = (r.get("holding_rule_alerts") or {}).get("reasons") or []
+            if alerts:
+                lines.append("  Holding alerts: " + "; ".join(alerts))
+        lines.append(f"⚡CU: {cu} ({', '.join(breakdown_cu)})")
+        print("\n".join(lines))
         return 0
 
     # ── Build envelope ──
@@ -9183,8 +9532,13 @@ def cmd_junk_predict(args):
     envelope = {
         "schemaVersion": 1, "kind": "junk-predict-v1", "run_id": run_id,
         "cu_used": cu, "params": {"chain": chain, "tokens": addresses,
+                                  "mode": mode, "include": sorted(include_flags),
+                                  "params_override": active_override,
                                   "threshold": threshold, "argv": sys.argv[1:]},
         "threshold": threshold,
+        "mode": mode,
+        "mode_label": mode_label,
+        "model_name": model_name,
         "n_tokens": len(results),
         "n_junk": n_junk,
         "results": results,
@@ -9192,6 +9546,16 @@ def cmd_junk_predict(args):
     }
 
     # ── Rendered HTML ──
+    def _junk_prob_color(score_value: float | int | None) -> str:
+        score_value = 0.0 if score_value is None else float(score_value)
+        if score_value < 25:
+            return "#22c55e"  # green
+        if score_value < 50:
+            return "#facc15"  # yellow
+        if score_value < 75:
+            return "#fb923c"  # orange
+        return "#ef4444"      # red
+
     def _fmt(v):
         if v is None:
             return "N/A"
@@ -9208,14 +9572,27 @@ def cmd_junk_predict(args):
         name = r.get("name") or sym
         is_junk = r.get("is_junk", False)
         score = r.get("junk_score", 0) or 0
-        score_color = "#ef4444" if is_junk else ("#f0b429" if score >= 50 else "#2ecc71")
+        score_color = _junk_prob_color(score)
         badge_color = "#ef4444" if is_junk else "#2ecc71"
         badge_text = "🚫 JUNK" if is_junk else "✅ OK"
-
-        # Feature highlights
-        feats = r.get("features", {})
-        val_liq_gap = feats.get("val_liq_gap", 0)
-        gap_color = "#ef4444" if val_liq_gap > 3 else ("#f0b429" if val_liq_gap > 1.5 else "#2ecc71")
+        metrics = r.get("shared_metrics") or {}
+        liquid_depth = metrics.get("liquid_depth_usd")
+        val_liq_gap = metrics.get("val_liq_gap")
+        vol_per_holder = metrics.get("vol_per_holder_usd")
+        top3_pct = metrics.get("top3_pct")
+        liq_vol_gap = metrics.get("liq_vol_gap")
+        gap_color = "#8a93a6"
+        if isinstance(val_liq_gap, (int, float)):
+            gap_color = "#ef4444" if val_liq_gap > 3 else ("#f0b429" if val_liq_gap > 1.5 else "#2ecc71")
+        liq_color = "#8a93a6"
+        if isinstance(liquid_depth, (int, float)):
+            liq_color = "#ef4444" if liquid_depth < 1000 else ("#f0b429" if liquid_depth < 100000 else "#22c55e")
+        vph_color = "#8a93a6"
+        if isinstance(vol_per_holder, (int, float)):
+            vph_color = "#ef4444" if vol_per_holder < 1 else ("#f0b429" if vol_per_holder < 20 else "#22c55e")
+        top3_color = "#8a93a6"
+        if isinstance(top3_pct, (int, float)):
+            top3_color = "#ef4444" if top3_pct > 95 else ("#f0b429" if top3_pct > 80 else "#22c55e")
 
         # Color helpers for % changes
         def _pct_color(v):
@@ -9240,6 +9617,57 @@ def cmd_junk_predict(args):
                 return "N/A"
             return f"{int(v):,}"
 
+        def _fmt_conc(v):
+            if v is None:
+                return "N/A"
+            return f"{v:.2f}%"
+
+        status_tags: list[str] = []
+        if r.get("healthy_guard"):
+            status_tags.append("Healthy guard")
+        if r.get("suspicious"):
+            status_tags.append("Watchlist")
+        if r.get("price_suspicious"):
+            status_tags.append("Price stress")
+        if r.get("holding_suspicious"):
+            status_tags.append("Holding concentration")
+        if r.get("min_risk_floor_applied"):
+            status_tags.append("Min risk 30")
+        holder_rule_alerts = r.get("holding_rule_alerts") or {}
+        for tag in holder_rule_alerts.get("tags") or []:
+            if tag not in status_tags:
+                status_tags.append(tag)
+        if r.get("holding_distribution_error"):
+            status_tags.append("Holder API unavailable")
+        status_html = "".join(
+            f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">{html.escape(tag)}</div>'
+            for tag in status_tags
+        )
+
+        holding_warn_html = ""
+        alert_reasons = holder_rule_alerts.get("reasons") or []
+        if alert_reasons:
+            holding_warn_html = "".join(
+                f'<div style="font-size:11px;background:rgba(239,68,68,.08);padding:4px 10px;border-radius:999px;color:#fca5a5;border:1px solid rgba(239,68,68,.25)">{html.escape(reason)}</div>'
+                for reason in alert_reasons
+            )
+            holding_warn_html = f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">{holding_warn_html}</div>'
+        if r.get("min_risk_floor_reason"):
+            floor_html = f'<div style="font-size:11px;background:rgba(250,204,21,.08);padding:4px 10px;border-radius:999px;color:#fde68a;border:1px solid rgba(250,204,21,.25)">{html.escape(r["min_risk_floor_reason"])}</div>'
+            holding_warn_html += f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">{floor_html}</div>'
+
+        holding_html = ""
+        if any(r.get(k) is not None for k in ("top1_pct", "top3_pct", "top4_pct", "top5_pct", "top10_pct")):
+            holding_html = (
+                f'<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">'
+                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top1: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc(r.get("top1_pct"))}</span></div>'
+                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top3: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc(r.get("top3_pct"))}</span></div>'
+                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top4: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc(r.get("top4_pct"))}</span></div>'
+                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top5: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc(r.get("top5_pct"))}</span></div>'
+                f'<div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">top10: <span style="color:#e6e8ef;font-weight:700">{_fmt_conc(r.get("top10_pct"))}</span></div>'
+                f'</div>'
+            )
+
         cards_html += f'''<div style="background:#171a21;border:1px solid {'#ef4444' if is_junk else '#262b36'};border-radius:12px;padding:16px;margin-bottom:12px">
   <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
     <div>
@@ -9247,6 +9675,7 @@ def cmd_junk_predict(args):
       <div style="font-size:11px;color:#8a93a6;font-family:ui-monospace,monospace">{r["address"]}</div>
     </div>
     <div style="text-align:right">
+      <div style="font-size:10px;color:#8a93a6;letter-spacing:.34px;text-transform:uppercase">Junk Probability</div>
       <div style="font-size:28px;font-weight:900;color:{score_color}">{score:.1f}<span style="font-size:12px;color:#8a93a6">/100</span></div>
       <div style="display:inline-block;background:{badge_color};color:#000;font-weight:800;font-size:11px;padding:2px 10px;border-radius:999px;margin-top:4px">{badge_text}</div>
     </div>
@@ -9296,28 +9725,31 @@ def cmd_junk_predict(args):
     </div>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap">
-    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">val-liq gap: <span style="color:{gap_color};font-weight:700">{val_liq_gap:.2f}</span></div>
-    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">liq/mcap: <span style="color:#e6e8ef;font-weight:700">{(feats.get("liq_to_val",0)*100):.2f}%</span></div>
-    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">vol/mcap: <span style="color:#e6e8ef;font-weight:700">{(feats.get("vol_to_val",0)*100):.2f}%</span></div>
+    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">Liquid depth: <span style="color:{liq_color};font-weight:700">{_fmt(liquid_depth)}</span></div>
+    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">Val/Liq gap: <span style="color:{gap_color};font-weight:700">{f"{val_liq_gap:.2f}" if isinstance(val_liq_gap, (int, float)) else "N/A"}</span></div>
+    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">Vol 24h / holder: <span style="color:{vph_color};font-weight:700">{_fmt(vol_per_holder)}</span></div>
+    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">Top3 holding: <span style="color:{top3_color};font-weight:700">{_fmt_conc(top3_pct)}</span></div>
+    {status_html}
   </div>
+  {holding_warn_html}
+  {holding_html}
 </div>'''
 
     summary_badge = ""
     if n_junk > 0:
         summary_badge = (f'<div style="background:#1a1a2e;border:1px solid #ef4444;border-radius:10px;padding:12px;margin-bottom:14px">'
-                         f'<span style="color:#ef4444;font-weight:800">⚠ {n_junk}/{len(results)} token được ML phân loại là JUNK</span> '
-                         f'(ngưỡng {threshold}/100)</div>')
+                         f'<span style="color:#ef4444;font-weight:800">⚠ {n_junk}/{len(results)} token(s) flagged as JUNK</span></div>')
     else:
         summary_badge = (f'<div style="background:#0f1f15;border:1px solid #2ecc71;border-radius:10px;padding:12px;margin-bottom:14px">'
-                         f'<span style="color:#2ecc71;font-weight:800">✅ {len(results)}/{len(results)} token OK</span> '
-                         f'(không vượt ngưỡng {threshold}/100)</div>')
+                         f'<span style="color:#2ecc71;font-weight:800">✅ {len(results)}/{len(results)} token(s) OK</span></div>')
 
+    include_note = " + holder distribution" if want_holding else ""
     html_out = (f'<div style="max-width:820px;margin:0 auto">'
                 f'<div style="font-size:20px;font-weight:800;color:#e6e8ef;margin-bottom:4px">🗑️ Junk Token Prediction</div>'
-                f'<div style="font-size:12px;color:#8a93a6;margin-bottom:14px">{chain.upper()} · {len(results)} token · ngưỡng {threshold}/100 · model: Logistic Regression (16 features)</div>'
+                f'<div style="font-size:12px;color:#8a93a6;margin-bottom:14px">{chain.upper()} · {len(results)} token(s) · {mode_label} · {html.escape(model_name)}{include_note}</div>'
                 f'{summary_badge}'
                 f'{cards_html}'
-                f'<div style="font-size:10px;color:#475569;margin-top:10px">Features: log_val, log_liq, log_vol, log_tx, log_trader, val_liq_gap, val_vol_gap, liq_vol_gap, liq_to_val, vol_to_val, vol_to_liq, vol_per_tx, has_val, has_liq, has_vol, is_dead</div>'
+                f'<div style="font-size:10px;color:#475569;margin-top:10px">⚡CU cost: {cu} ({html.escape(", ".join(breakdown_cu))})</div>'
                 f'</div>')
 
     envelope["html"] = html_out
@@ -9335,7 +9767,7 @@ def cmd_junk_predict(args):
     _write_cache(cdir, run_id, file_payload)
     sys.stdout.write(f"#RUN_ID {run_id}\tjunk-predict\tcu={cu}\n")
 
-    if fmt == "raw-json":
+    if fmt == "json":
         print(json.dumps(envelope, ensure_ascii=False))
         return 0
 
@@ -9363,7 +9795,11 @@ def cmd_junk_quick_test(args):
     max_mcap = getattr(args, "max_market_cap", None)
     # Threshold is decided by the model (lr_params.json), not by the user.
     threshold = float(_jml._get_model().get("threshold", 95.0))
-    fmt = args.format
+    fmt = str(getattr(args, "format", "ui") or "ui").strip().lower()
+    if fmt in {"render", "rendered", "ui"}:
+        fmt = "ui"
+    elif fmt in {"raw-json", "json"}:
+        fmt = "json"
     key = _load_key()
     if not key:
         sys.stderr.write("[junk-quick-test] missing BIRDEYE_API_KEY.\n")
@@ -9511,6 +9947,27 @@ def cmd_junk_quick_test(args):
         })
         sys.stdout.write(f"#RUN_ID {run_id}\tjunk-quick-test\tcu={cu}\n")
         return 0
+    if fmt == "telegram":
+        lines = [
+            "🗑️ Junk Quick Test",
+            f"Chain: {chain.upper()} · Sample: {pick_count}/{total}",
+        ]
+        if platform:
+            lines.append(f"Platform: {platform}")
+        lines.append(f"Flagged JUNK: {n_junk}/{len(results)}")
+        for r in results[:20]:
+            if r.get("error"):
+                lines.append(f"• {r['address'][:16]}… → ERROR: {r['error']}")
+                continue
+            verdict = "🚫 JUNK" if r.get("is_junk") else "✅ OK"
+            lines.append(
+                f"• {r.get('name') or r.get('symbol') or r['address'][:12]} "
+                f"({r.get('symbol') or '?'})\n"
+                f"  Junk Probability: {r.get('junk_score', 0):.1f}/100 · {verdict}"
+            )
+        lines.append(f"⚡CU: {cu} ({', '.join(breakdown_cu)})")
+        sys.stdout.write("\n".join(lines) + "\n")
+        return 0
 
     # ── Rendered HTML ──
     def _fmt(v):
@@ -9533,6 +9990,16 @@ def cmd_junk_quick_test(args):
         color = "#2ecc71" if v > 0 else ("#ef4444" if v < 0 else "#94a3b8")
         return f'<span style="color:{color};font-weight:700">{sign}{v:.2f}%</span>'
 
+    def _junk_prob_color(score_value: float | int | None) -> str:
+        score_value = 0.0 if score_value is None else float(score_value)
+        if score_value < 25:
+            return "#22c55e"  # green
+        if score_value < 50:
+            return "#facc15"  # yellow
+        if score_value < 75:
+            return "#fb923c"  # orange
+        return "#ef4444"      # red
+
     cards_html = ""
     for r in results:
         if r.get("error"):
@@ -9544,13 +10011,25 @@ def cmd_junk_quick_test(args):
         name = r.get("name") or sym
         is_junk = r.get("is_junk", False)
         score = r.get("junk_score", 0) or 0
-        score_color = "#ef4444" if is_junk else ("#f0b429" if score >= 50 else "#2ecc71")
+        score_color = _junk_prob_color(score)
         badge_color = "#ef4444" if is_junk else "#2ecc71"
         badge_text = "🚫 JUNK" if is_junk else "✅ OK"
 
-        feats = r.get("features", {})
-        val_liq_gap = feats.get("val_liq_gap", 0)
+        shared = r.get("shared_metrics") or {}
+        liquid_depth = shared.get("liquid_depth_usd")
+        val_liq_gap = shared.get("val_liq_gap", 0)
+        vol_per_holder = shared.get("vol_per_holder_usd")
+        top3_pct = shared.get("top3_pct")
         gap_color = "#ef4444" if val_liq_gap > 3 else ("#f0b429" if val_liq_gap > 1.5 else "#2ecc71")
+        liq_color = "#8a93a6" if liquid_depth is None else ("#ef4444" if liquid_depth < 1000 else ("#f0b429" if liquid_depth < 100000 else "#22c55e"))
+        vph_color = "#8a93a6" if vol_per_holder is None else ("#ef4444" if vol_per_holder < 1 else ("#f0b429" if vol_per_holder < 20 else "#22c55e"))
+        top3_color = "#8a93a6" if top3_pct is None else ("#ef4444" if top3_pct > 95 else ("#f0b429" if top3_pct > 80 else "#22c55e"))
+        floor_chip_html = ""
+        if r.get("min_risk_floor_reason"):
+            floor_chip_html = (
+                f'<div style="font-size:10px;background:rgba(250,204,21,.08);padding:3px 9px;border-radius:999px;'
+                f'color:#fde68a;border:1px solid rgba(250,204,21,.25)">{html.escape(r["min_risk_floor_reason"])}</div>'
+            )
 
         cards_html += f'''<div style="background:#171a21;border:1px solid {'#ef4444' if is_junk else '#262b36'};border-radius:12px;padding:14px;margin-bottom:10px">
   <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
@@ -9604,9 +10083,11 @@ def cmd_junk_quick_test(args):
     </div>
   </div>
   <div style="display:flex;gap:6px;flex-wrap:wrap">
-    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">val-liq gap: <span style="color:{gap_color};font-weight:700">{val_liq_gap:.2f}</span></div>
-    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">liq/mcap: <span style="color:#e6e8ef;font-weight:700">{(feats.get("liq_to_val",0)*100):.2f}%</span></div>
-    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">vol/mcap: <span style="color:#e6e8ef;font-weight:700">{(feats.get("vol_to_val",0)*100):.2f}%</span></div>
+    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">Liquid depth: <span style="color:{liq_color};font-weight:700">{_fmt(liquid_depth)}</span></div>
+    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">Val/Liq gap: <span style="color:{gap_color};font-weight:700">{val_liq_gap:.2f}</span></div>
+    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">Vol 24h / holder: <span style="color:{vph_color};font-weight:700">{_fmt(vol_per_holder)}</span></div>
+    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">Top3 holding: <span style="color:{top3_color};font-weight:700">{f"{top3_pct:.2f}%" if isinstance(top3_pct, (int, float)) else "N/A"}</span></div>
+    {floor_chip_html}
     <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">listed: <span style="color:#e6e8ef;font-weight:700">{_dt.datetime.utcfromtimestamp(r["recent_listing_time"]).strftime("%Y-%m-%d") if r.get("recent_listing_time") else 'N/A'}</span></div>
   </div>
 </div>'''
@@ -9653,7 +10134,7 @@ def cmd_junk_quick_test(args):
     _write_cache(cdir, run_id, file_payload)
     sys.stdout.write(f"#RUN_ID {run_id}\tjunk-quick-test\tcu={cu}\n")
 
-    if fmt == "raw-json":
+    if fmt == "json":
         print(json.dumps(envelope, ensure_ascii=False))
         return 0
 
