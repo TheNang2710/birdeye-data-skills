@@ -99,13 +99,16 @@ git push origin main
 
 ## 5. Deploy Vercel
 
+> ⚠️ Project `birdeye-data-skills` có **Root Directory = `deploy-vercel`**. Vì vậy phải chạy CLI từ **repo root** (không phải trong `deploy-vercel/`, nếu không Vercel sẽ tìm `deploy-vercel/deploy-vercel` và báo *"The specified Root Directory does not exist"*).
+
 ```bash
-cd /Users/nguyenthenang/nang/birdeye/app/skills/deploy-vercel
-npx vercel --prod          # deploy production
+cd /Users/nguyenthenang/nang/birdeye/app/skills
+npx vercel --prod --project birdeye-data-skills --yes
 ```
-**Kiểm tra sau deploy:**
+**Kiểm tra sau deploy** (Deployment Protection đang bật → phải curl qua CLI):
 ```bash
-npx vercel curl /api/meta --deployment https://birdeye-data-skills.vercel.app
+cd deploy-vercel
+npx vercel curl /api/meta
 # mong đợi: "ml_ready": true, "cli_ready": true
 ```
 
@@ -130,8 +133,8 @@ Vercel → project `birdeye-data-skills` → **Git → Connect** → account `Th
 ./server.sh restart          # http://127.0.0.1:8765/  và  /test
 # 3) push (repo thống nhất)
 git add -A && git commit -m "..." && git push origin main
-# 4) redeploy Vercel
-cd deploy-vercel && npx vercel --prod
+# 4) redeploy Vercel (chạy từ REPO ROOT — xem mục 5)
+npx vercel --prod --project birdeye-data-skills --yes
 ```
 
 ---

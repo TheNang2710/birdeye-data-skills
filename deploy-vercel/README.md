@@ -87,14 +87,19 @@ repo (`birdeye-data-skills`). Pick one of the two ways below.
 
 ### Option A — Vercel CLI (fastest)
 
+> The `birdeye-data-skills` project has **Root Directory = `deploy-vercel`**, so
+> the CLI must run from the **repo root** (running inside `deploy-vercel/` makes
+> Vercel look for `deploy-vercel/deploy-vercel` and fail with
+> *"The specified Root Directory does not exist"*).
+
 ```bash
-cd deploy-vercel
+cd ..                 # repo root (birdeye-data-skills)
 npx vercel login      # first run only
-npx vercel            # preview deployment -> prints a preview URL
-npx vercel --prod     # production deployment
+npx vercel --prod --project birdeye-data-skills --yes   # production
 ```
 
-The CLI uploads the folder as-is, so `api/_ml/` goes up too (the ML skills need it).
+The CLI uploads the repo and Vercel builds only `deploy-vercel/`, so `api/_ml/`
+goes up too (the ML skills need it).
 
 > **Why `"framework": null` in `vercel.json`** — Vercel auto-detects a Python
 > framework preset here and then demands a *single* entrypoint, failing with
