@@ -25,9 +25,11 @@ from __future__ import annotations
 import argparse
 import csv
 import datetime as _dt
+import html
 import json
 import math
 import os
+import random
 import sys
 import time
 from dataclasses import dataclass
@@ -40,6 +42,8 @@ import requests
 from modules import kline_pattern as _kp
 from modules import contract_dd as _cdd
 from modules import wallet_data as _wd
+from modules import trending_score as _ts
+from modules import junk_ml as _jml
 
 BIRDEYE_BASE = "https://public-api.birdeye.so"
 CHAINS = {"sol": "solana", "bsc": "bsc", "base": "base", "eth": "ethereum", "arc": "arbitrum", "robinhood": "robinhood"}
@@ -2361,12 +2365,14 @@ def build_parser():
     # Skill #14 — Wallet Analysis (single-wallet deep-dive: profile/assets/trading/performance/risk by intervals)
     pwa = sub.add_parser("wallet-analysis",
                          help="Skill #14 · Wallet Analysis — single-wallet deep-dive: profile, assets (current + intervals), "
-                              "trading & performance by interval, risk metrics. Default intervals: 24h,7d,30d,90d,all.")
+                              "trading & performance by interval, risk metrics. Default mode: normal.")
     pwa.add_argument("--chain", choices=list(CHAINS.keys()), default="sol")
     pwa.add_argument("--wallet", required=True, help="Wallet address")
     pwa.add_argument("--pnl-method", dest="pnl_method", choices=["wac", "net_cash"], default="wac")
-    pwa.add_argument("--intervals", default="24h,7d,30d,90d,all",
-                     help="Comma-separated PnL intervals: 24h,7d,30d,90d,all (default all 5).")
+    pwa.add_argument("--horizon", choices=["short", "normal", "long"], default="normal",
+                     help="Analysis horizon preset. short=24h,7d,30d · normal=24h,7d,30d,90d · long=30d,90d,all.")
+    pwa.add_argument("--intervals", default=None,
+                     help="Legacy override. Comma-separated PnL intervals: 24h,7d,30d,90d,all.")
     pwa.add_argument("--skip-tx-list", dest="skip_tx_list", action="store_true", default=False,
                      help="Skip /v1/wallet/tx_list (save ~30 CU). No style / TP-SL inference.")
     pwa.add_argument("--skip-first-tx", dest="skip_first_tx", action="store_true", default=False,
@@ -2425,6 +2431,52 @@ def build_parser():
                       help="Skip kline price-action pillar (save ~25 CU).")
     pcdd.add_argument("--format", choices=["plain", "telegram", "raw-json", "rendered"], default="rendered")
     pcdd.set_defaults(func=cmd_contract_dd)
+
+    # --- Skill #22 — Token Trending Score ---
+    pts = sub.add_parser("token-trending-score",
+                         help="Skill #22 · Token Trending Score — 0..100 momentum score per interval "
+                              "(5m/15m/30m/1h/4h) from OHLCV + liquidity + holders + security. "
+                              "Typical ~171 CU (ohlcv 100 + liq 20 + overview 21 + security 30).")
+    pts.add_argument("--chain", choices=list(CHAINS.keys()), default="sol")
+    pts.add_argument("--address", required=True, help="Token contract address")
+    pts.add_argument("--candles", type=int, default=5000,
+                     help="Number of 1m OHLCV candles (default 5000 = 100 CU, covers ~83h).")
+    pts.add_argument("--nocache", dest="nocache", action="store_true", default=False,
+                      help="Bypass 24h CSV cache and fetch fresh data.")
+    pts.add_argument("--format", choices=["plain", "telegram", "raw-json", "rendered"], default="rendered")
+    pts.set_defaults(func=cmd_trending_score)
+
+    # Skill #23 — Junk Token Prediction (ML classifier)
+    pj = sub.add_parser("junk-predict",
+                         help="Skill #23 · Junk Token Prediction — ML predicts junk score (0-100) "
+                              "from mcap/liquidity/volume/tx/trader. "
+                              "Fetches /defi/token_overview for each token. ~21 CU/token.")
+    pj.add_argument("--chain", choices=list(CHAINS.keys()), default="sol")
+    pj.add_argument("--tokens", required=True,
+                    help="Comma-separated or newline-separated token addresses")
+    pj.add_argument("--format", choices=["plain", "raw-json", "rendered"], default="rendered")
+    pj.set_defaults(func=cmd_junk_predict)
+
+    pjq = sub.add_parser("junk-quick-test",
+                         help="Skill #23 · Junk Quick Test — fetches up to 5000 tokens via "
+                              "/defi/v3/token/list/scroll (1 call, 300 CU), randomly picks N tokens, "
+                              "runs ML junk prediction on list data (no per-token overview call).")
+    pjq.add_argument("--chain", choices=list(CHAINS.keys()), default="sol")
+    pjq.add_argument("--num", type=int, default=30,
+                     help="Number of random tokens to evaluate (default 30)")
+    pjq.add_argument("--limit", type=int, default=5000,
+                     help="Scroll page size 1..5000 (default 5000)")
+    pjq.add_argument("--sort-by", default="liquidity",
+                     help="Sort field (default liquidity). See Birdeye v3 list docs.")
+    pjq.add_argument("--sort-type", choices=["desc", "asc"], default="desc")
+    pjq.add_argument("--platform", default=None,
+                     help="Filter by platform (e.g. pump.fun, moonshot, raydium)")
+    pjq.add_argument("--min-liquidity", type=float, default=None)
+    pjq.add_argument("--max-liquidity", type=float, default=None)
+    pjq.add_argument("--min-market-cap", type=float, default=None)
+    pjq.add_argument("--max-market-cap", type=float, default=None)
+    pjq.add_argument("--format", choices=["plain", "raw-json", "rendered"], default="rendered")
+    pjq.set_defaults(func=cmd_junk_quick_test)
 
     return p
 
@@ -5363,11 +5415,13 @@ def cmd_history_list(args):
                 "trending-list": f"{params.get('source','?')} · {params.get('interval')} · {params.get('sort_by')} · {params.get('chain','sol')}",
                 "token-dd": f"{params.get('chain','sol')} · {params.get('address','')[:8]}…{(params.get('address','') or '')[-4:]}",
                 "smart-wallets": f"{params.get('depth_label', params.get('depth','?'))} · chain={params.get('chain','sol')} · pass≥{params.get('pass_min','?')}",
+                "token-trending-score-v1": f"TS · {params.get('chain','sol')} · {params.get('address','')[:8]}…",
             }.get(kind, "run")
             extra1 = {
                 "trending-list": f"{raw.get('total_tokens', len(raw.get('rows',[])))} tokens",
                 "token-dd": f"{raw.get('symbol') or raw.get('address') or ''} · score {raw.get('scores',{}).get('final','?')}",
                 "smart-wallets": f"PASS {raw.get('total_pass', len(raw.get('results_pass',[])))} · {raw.get('cu_used_total','?')}CU",
+                "token-trending-score-v1": f"{raw.get('symbol') or ''} · overall {raw.get('overall_trending_score','?')}",
             }.get(kind, "")
             items.append({
                 "runId": fp.stem,
@@ -6306,7 +6360,27 @@ def cmd_wallet_style(args):
 # Skill #14 · Wallet Analysis — single-wallet deep-dive
 #   profile / assets / trading / performance / risk  across user-selected intervals
 # ════════════════════════════════════════════════════════════════════════════
-_WA_DEFAULT_INTERVALS = ["24h", "7d", "30d", "90d", "all"]
+_WA_DEFAULT_INTERVALS = ["24h", "7d", "30d", "90d"]
+_WA_HORIZON_PRESETS = {
+    "short": {
+        "intervals": ["24h", "7d", "30d"],
+        "per_token_duration": "7d",
+        "networth_count": 30,
+        "all_days": 30,
+    },
+    "normal": {
+        "intervals": ["24h", "7d", "30d", "90d"],
+        "per_token_duration": "30d",
+        "networth_count": 90,
+        "all_days": 90,
+    },
+    "long": {
+        "intervals": ["30d", "90d", "all"],
+        "per_token_duration": "90d",
+        "networth_count": 180,
+        "all_days": 180,
+    },
+}
 
 
 def _wa_extract_summary(summary_resp):
@@ -6544,13 +6618,32 @@ def cmd_wallet_analysis(args):
     wallet = args.wallet.strip()
     pnl_method = getattr(args, "pnl_method", "wac")
     fmt = args.format
-    intervals = [x.strip() for x in (getattr(args, "intervals", None) or ",".join(_WA_DEFAULT_INTERVALS)).split(",") if x.strip()]
+    horizon = (getattr(args, "horizon", None) or "normal").strip().lower()
+    preset = _WA_HORIZON_PRESETS.get(horizon, _WA_HORIZON_PRESETS["normal"])
+    intervals_arg = getattr(args, "intervals", None)
+    intervals = [x.strip() for x in (intervals_arg or ",".join(preset["intervals"])).split(",") if x.strip()]
     # normalize: dedup keep order
     seen = set(); ivs = []
     for iv in intervals:
         if iv not in seen:
             seen.add(iv); ivs.append(iv)
-    intervals = ivs or list(_WA_DEFAULT_INTERVALS)
+    intervals = ivs or list(preset["intervals"])
+    using_custom_intervals = bool(intervals_arg and intervals_arg.strip() and intervals != preset["intervals"])
+    horizon_label = "custom" if using_custom_intervals else horizon
+    per_token_duration = preset["per_token_duration"]
+    networth_count = preset["networth_count"]
+    all_days = preset["all_days"]
+    if using_custom_intervals:
+        if "all" in intervals:
+            per_token_duration, networth_count, all_days = "90d", 180, 180
+        elif "90d" in intervals:
+            per_token_duration, networth_count, all_days = "90d", 90, 90
+        elif "30d" in intervals:
+            per_token_duration, networth_count, all_days = "30d", 30, 30
+        elif "7d" in intervals:
+            per_token_duration, networth_count, all_days = "7d", 7, 7
+        else:
+            per_token_duration, networth_count, all_days = "24h", 7, 7
     nocache = bool(getattr(args, "nocache", False))
     cdir_arg = getattr(args, "cache_dir", None)
     write_cache = bool(getattr(args, "write_cache", True))
@@ -6588,7 +6681,7 @@ def cmd_wallet_analysis(args):
         sys.stderr.write("[wallet-analysis] missing BIRDEYE_API_KEY.\n")
         return 2
 
-    rid = _safe_run_id("wallet-analysis", f"{chain_short}_{wallet[:10]}_{intervals[0]}")
+    rid = _safe_run_id("wallet-analysis", f"{chain_short}_{wallet[:10]}_{horizon_label}")
     cu = {}
     import requests as _req
     session = _req.Session()
@@ -6597,7 +6690,7 @@ def cmd_wallet_analysis(args):
     try:
         for iv in intervals:
             summaries[iv], cu[f"pnl_{iv}"] = _ws_fetch_pnl_summary(session, api_key, chain_full, wallet, iv, pnl_method)
-        per_token, cu["pnl_details"] = _ws_fetch_pnl_per_token(session, api_key, chain_full, wallet, pnl_method, duration="30d")
+        per_token, cu["pnl_details"] = _ws_fetch_pnl_per_token(session, api_key, chain_full, wallet, pnl_method, duration=per_token_duration)
 
         first_funded = {}
         cu["first_funded"] = 0
@@ -6624,7 +6717,7 @@ def cmd_wallet_analysis(args):
         networth_history = {}
         cu["networth_history"] = 0
         if chain_full == "solana":
-            networth_history, cu["networth_history"] = _ws_fetch_networth_history(session, api_key, wallet, count=90, type_="1d")
+            networth_history, cu["networth_history"] = _ws_fetch_networth_history(session, api_key, wallet, count=networth_count, type_="1d")
     except Exception as e:
         sys.stderr.write(f"[wallet-analysis] API error: {e}\n")
         return 4
@@ -6723,7 +6816,7 @@ def cmd_wallet_analysis(args):
         return nw_history[best_d]
 
     # Asset intervals: use real net-worth history when available, else approximate.
-    interval_days = {"24h": 1, "7d": 7, "30d": 30, "90d": 90, "all": 90}
+    interval_days = {"24h": 1, "7d": 7, "30d": 30, "90d": 90, "all": all_days}
     assets_intervals = {}
     for iv in intervals:
         s = s_map[iv]
@@ -6825,8 +6918,10 @@ def cmd_wallet_analysis(args):
     cu_total = _ws_total_cu(cu)
     params_snapshot = {
         "chain": chain_short, "wallet": wallet, "pnl_method": pnl_method,
+        "horizon": horizon_label,
         "intervals": intervals, "skip_tx_list": skip_tx, "skip_first_tx": skip_first_tx,
-        "skip_portfolio": skip_portfolio, "argv": sys.argv[1:],
+        "skip_portfolio": skip_portfolio, "per_token_duration": per_token_duration,
+        "argv": sys.argv[1:],
     }
 
     analysis = {
@@ -6843,6 +6938,7 @@ def cmd_wallet_analysis(args):
         f"CU: {cu_total} ({', '.join(f'{k}={v}' for k,v in cu.items())})",
         "",
         "─── Profile ───",
+        f"  Horizon      : {horizon_label}",
         f"  Style        : {profile['trading_style']}",
         f"  Wallet age   : {wallet_age_days}d" if wallet_age_days else "  Wallet age   : N/A",
         f"  TP / SL      : {avg_win_pct}% / {avg_loss_pct}%" if avg_win_pct is not None else "  TP / SL      : N/A",
@@ -6879,6 +6975,7 @@ def cmd_wallet_analysis(args):
         f"*Skill #14 · Wallet Analysis* `{w_short}`",
         f"Chain: {chain_short.upper()} | CU: {cu_total}",
         "",
+        f"*Horizon*: {horizon_label}",
         f"*Style*: {profile['trading_style']}" + (f" · age {wallet_age_days}d" if wallet_age_days else ""),
     ]
     if avg_win_pct is not None:
@@ -6925,9 +7022,10 @@ def cmd_wallet_analysis(args):
 <div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Skill #14 · Wallet Analysis</div>
 <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
   <div style="font-size:18px;font-weight:700"><span class="copy-addr" data-copy-addr="{wallet}" style="cursor:pointer" title="Click to copy full wallet address">@{w_short} 📋</span></div>
-  <div style="font-size:11px;color:#94a3b8">{chain_short.upper()} · ⚡ {cu_total} CU</div>
+  <div style="font-size:11px;color:#94a3b8">{chain_short.upper()} · {horizon_label} · ⚡ {cu_total} CU</div>
 </div>
-<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:14px">
+<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:14px">
+  <div style="background:#0f172a;border-radius:6px;padding:8px;text-align:center"><div style="font-size:10px;color:#64748b">HORIZON</div><div style="font-size:16px;font-weight:700;margin-top:2px">{horizon_label}</div></div>
   <div style="background:#0f172a;border-radius:6px;padding:8px;text-align:center"><div style="font-size:10px;color:#64748b">STYLE</div><div style="font-size:16px;font-weight:700;margin-top:2px">{profile['trading_style']}</div></div>
   <div style="background:#0f172a;border-radius:6px;padding:8px;text-align:center"><div style="font-size:10px;color:#64748b">AGE</div><div style="font-size:16px;font-weight:700;margin-top:2px">{wallet_age_days if wallet_age_days else 'N/A'}d</div></div>
   <div style="background:#0f172a;border-radius:6px;padding:8px;text-align:center"><div style="font-size:10px;color:#64748b">TP / SL</div><div style="font-size:14px;font-weight:700;margin-top:2px">{('+'+str(avg_win_pct)+'% / '+str(avg_loss_pct)+'%') if avg_win_pct is not None else 'N/A'}</div></div>
@@ -7829,7 +7927,7 @@ def cmd_history_render(args):
     # Format "render" = payload envelope suitable for UI renderers, always JSON
     if fmt == "render":
         if kind in ("wallet-alpha-score-v1", "wallet-style-v1", "kline-pattern-v1", "contract-dd-v1",
-                    "wallet-analysis-v1", "smart-money-profile-v1"):
+                    "wallet-analysis-v1", "smart-money-profile-v1", "token-trending-score-v1"):
             # Unwrap the pre-rendered JSON string so UI gets html + metrics directly.
             rendered_raw = cached.get("rendered_rendered") or cached.get("rendered_raw-json") or ""
             try:
@@ -7855,8 +7953,8 @@ def cmd_history_render(args):
         _render_sw_from_cache(cached, fmt, args.run_id)
         return 0
     if kind in ("wallet-alpha-score-v1", "wallet-style-v1", "kline-pattern-v1", "contract-dd-v1",
-                "wallet-analysis-v1", "smart-money-profile-v1"):
-        # Wallet score/style/kline/contract-dd cache stores each format as a pre-rendered string field.
+                "wallet-analysis-v1", "smart-money-profile-v1", "token-trending-score-v1"):
+        # Wallet score/style/kline/contract-dd/trending-score cache stores each format as a pre-rendered string field.
         field_map = {"plain": "rendered_plain", "telegram": "rendered_telegram",
                      "raw-json": "rendered_raw-json", "rendered": "rendered_rendered"}
         field = field_map.get(fmt)
@@ -8001,37 +8099,30 @@ def cmd_kline_pattern(args):
     label = _KP_PATTERN_LABELS.get(pattern, pattern)
     color = _KP_PATTERN_COLORS.get(pattern, "#64748b")
 
-    if fmt == "plain":
-        print(f"Skill #21 · Kline Pattern — {address[:20]}..")
-        print(f"Pattern : {label}")
-        print(f"Score   : {score}/100")
-        print(f"Candles : {m['n_candles']} ({resolution})")
-        print(f"  trend_up    : {m['trend_up']}")
-        print(f"  slope       : {m['slope']}")
-        print(f"  volatility  : {m['volatility']}")
-        print(f"  drawdown    : {m['drawdown']}")
-        print(f"  vol_ratio   : {m['vol_ratio']}")
-        print(f"  up_from_low : {m['up_from_low']}")
-        print("Evidence:")
-        for e in result["evidence"]:
-            print(f"  - {e}")
-        print("Score deltas:")
-        for d in result["deltas"]:
-            print(f"  {d}")
-        return 0
+    plain_lines = [
+        f"Skill #21 · Kline Pattern — {address[:20]}..",
+        f"Pattern : {label}",
+        f"Score   : {score}/100",
+        f"Candles : {m['n_candles']} ({resolution})",
+        f"  trend_up    : {m['trend_up']}",
+        f"  slope       : {m['slope']}",
+        f"  volatility  : {m['volatility']}",
+        f"  drawdown    : {m['drawdown']}",
+        f"  vol_ratio   : {m['vol_ratio']}",
+        f"  up_from_low : {m['up_from_low']}",
+        "Evidence:",
+    ]
+    plain_lines.extend(f"  - {e}" for e in result["evidence"])
+    plain_lines.append("Score deltas:")
+    plain_lines.extend(f"  {d}" for d in result["deltas"])
+    out_plain = "\n".join(plain_lines)
 
-    if fmt == "telegram":
-        out = [f"*Kline Pattern* `{address[:12]}..`"]
-        out.append(f"Pattern: {label} | Score: {score}/100")
-        out.append(f"Candles: {m['n_candles']} ({resolution})")
-        out.append(f"trend={m['trend_up']} slope={m['slope']} vol={m['volatility']}")
-        out.append(f"dd={m['drawdown']} vol_ratio={m['vol_ratio']} up_from_low={m['up_from_low']}")
-        print("\n".join(out))
-        return 0
-
-    if fmt == "raw-json":
-        print(json.dumps(result, ensure_ascii=False))
-        return 0
+    tg_lines = [f"*Kline Pattern* `{address[:12]}..`"]
+    tg_lines.append(f"Pattern: {label} | Score: {score}/100")
+    tg_lines.append(f"Candles: {m['n_candles']} ({resolution})")
+    tg_lines.append(f"trend={m['trend_up']} slope={m['slope']} vol={m['volatility']}")
+    tg_lines.append(f"dd={m['drawdown']} vol_ratio={m['vol_ratio']} up_from_low={m['up_from_low']}")
+    out_telegram = "\n".join(tg_lines)
 
     # rendered HTML
     ev_html = "".join(f'<div style="font-size:12px;color:#94a3b8;padding:2px 0">• {e}</div>' for e in result["evidence"])
@@ -8075,6 +8166,8 @@ def cmd_kline_pattern(args):
                                           "argv": sys.argv[1:]},
                 "pattern": pattern, "score": score, "measurements": m,
                 "label": label, "color": color, "html": html}
+    out_raw_json = json.dumps(result, ensure_ascii=False)
+    out_rendered_json = json.dumps(envelope, ensure_ascii=False)
     # Persist to cache so the run appears in History tab (0-CU replay later)
     cdir = _cache_dir(getattr(args, "cache_dir", None))
     file_payload = {
@@ -8085,15 +8178,24 @@ def cmd_kline_pattern(args):
         "measurements": m, "evidence": result.get("evidence", []),
         "deltas": result.get("deltas", []),
         "snapshot_time": int(time.time()),
-        "rendered_plain": json.dumps(envelope, ensure_ascii=False),
-        "rendered_telegram": json.dumps(envelope, ensure_ascii=False),
-        "rendered_raw-json": json.dumps(envelope, ensure_ascii=False),
-        "rendered_rendered": json.dumps(envelope, ensure_ascii=False),
-        "out": json.dumps(envelope, ensure_ascii=False),
+        "rendered_plain": out_plain,
+        "rendered_telegram": out_telegram,
+        "rendered_raw-json": out_raw_json,
+        "rendered_rendered": out_rendered_json,
+        "out": out_plain,
     }
     _write_cache(cdir, run_id, file_payload)
     sys.stdout.write(f"#RUN_ID {run_id}\tkline-pattern\tcu={cu}\n")
-    print(json.dumps(envelope, ensure_ascii=False))
+    if fmt == "plain":
+        print(out_plain)
+        return 0
+    if fmt == "telegram":
+        print(out_telegram)
+        return 0
+    if fmt == "raw-json":
+        print(out_raw_json)
+        return 0
+    print(out_rendered_json)
     return 0
 
 
@@ -8204,37 +8306,32 @@ def cmd_contract_dd(args):
     tier = analysis["tier"]
     name = analysis.get("name") or ""
 
-    if fmt == "plain":
-        title = f"Skill #5 · Contract DD — {symbol}" + (f" ({name})" if name else "")
-        print(title)
-        print(f"Address : {address}")
-        print(f"Chain   : {chain}")
-        print(f"Composite: {composite}/100  {tier['emoji']} {tier['name']}")
-        print(f"  Safety  (45%): {analysis['safety_score']}/100")
-        print(f"  Holders (30%): {analysis['holders_score']}/100")
-        print(f"  Price   (25%): {analysis['price_score']}/100")
-        print(f"CU used: {cu} ({', '.join(breakdown_cu)})")
-        print("\nSafety breakdown:")
-        for b in analysis["safety_breakdown"]:
-            print(f"  {b['delta']:+d}  {b['detail']}")
-        print("\nHolders breakdown:")
-        for b in analysis["holders_breakdown"]:
-            print(f"  {b['delta']:+d}  {b['detail']}")
-        if kline_result and kline_result.get("ok"):
-            print(f"\nPrice action: {kline_result['pattern']} → {kline_result['score']}/100")
-        return 0
+    plain_lines = [
+        f"Skill #5 · Contract DD — {symbol}" + (f" ({name})" if name else ""),
+        f"Address : {address}",
+        f"Chain   : {chain}",
+        f"Composite: {composite}/100  {tier['emoji']} {tier['name']}",
+        f"  Safety  (45%): {analysis['safety_score']}/100",
+        f"  Holders (30%): {analysis['holders_score']}/100",
+        f"  Price   (25%): {analysis['price_score']}/100",
+        f"CU used: {cu} ({', '.join(breakdown_cu)})",
+        "",
+        "Safety breakdown:",
+    ]
+    plain_lines.extend(f"  {b['delta']:+d}  {b['detail']}" for b in analysis["safety_breakdown"])
+    plain_lines.append("")
+    plain_lines.append("Holders breakdown:")
+    plain_lines.extend(f"  {b['delta']:+d}  {b['detail']}" for b in analysis["holders_breakdown"])
+    if kline_result and kline_result.get("ok"):
+        plain_lines.append("")
+        plain_lines.append(f"Price action: {kline_result['pattern']} → {kline_result['score']}/100")
+    out_plain = "\n".join(plain_lines)
 
-    if fmt == "telegram":
-        out = [f"*Contract DD* `{symbol}`"]
-        out.append(f"Composite: {composite}/100 {tier['emoji']} {tier['name']}")
-        out.append(f"Safety {analysis['safety_score']} · Holders {analysis['holders_score']} · Price {analysis['price_score']}")
-        out.append(f"CU: {cu}")
-        print("\n".join(out))
-        return 0
-
-    if fmt == "raw-json":
-        print(json.dumps(analysis, ensure_ascii=False))
-        return 0
+    tg_lines = [f"*Contract DD* `{symbol}`"]
+    tg_lines.append(f"Composite: {composite}/100 {tier['emoji']} {tier['name']}")
+    tg_lines.append(f"Safety {analysis['safety_score']} · Holders {analysis['holders_score']} · Price {analysis['price_score']}")
+    tg_lines.append(f"CU: {cu}")
+    out_telegram = "\n".join(tg_lines)
 
     # rendered HTML
     def _bd_html(bd_list):
@@ -8280,6 +8377,8 @@ def cmd_contract_dd(args):
                 "marketcap": analysis.get("marketcap"),
                 "kline_result": kline_result if kline_result and kline_result.get("ok") else None,
                 "html": html}
+    out_raw_json = json.dumps(analysis, ensure_ascii=False)
+    out_rendered_json = json.dumps(envelope, ensure_ascii=False)
     # Persist to cache so the run appears in History tab (0-CU replay later)
     cdir = _cache_dir(getattr(args, "cache_dir", None))
     file_payload = {
@@ -8288,14 +8387,1276 @@ def cmd_contract_dd(args):
         "params": envelope["params"],
         "symbol": symbol, "name": name, "composite": composite, "tier": tier,
         "snapshot_time": int(time.time()),
-        "rendered_plain": json.dumps(envelope, ensure_ascii=False),
-        "rendered_telegram": json.dumps(envelope, ensure_ascii=False),
-        "rendered_raw-json": json.dumps(envelope, ensure_ascii=False),
-        "rendered_rendered": json.dumps(envelope, ensure_ascii=False),
-        "out": json.dumps(envelope, ensure_ascii=False),
+        "rendered_plain": out_plain,
+        "rendered_telegram": out_telegram,
+        "rendered_raw-json": out_raw_json,
+        "rendered_rendered": out_rendered_json,
+        "out": out_plain,
     }
     _write_cache(cdir, run_id, file_payload)
     sys.stdout.write(f"#RUN_ID {run_id}\tcontract-dd\tcu={cu}\n")
+    if fmt == "plain":
+        print(out_plain)
+        return 0
+    if fmt == "telegram":
+        print(out_telegram)
+        return 0
+    if fmt == "raw-json":
+        print(out_raw_json)
+        return 0
+    print(out_rendered_json)
+    return 0
+
+
+# ============================================================
+# Skill #22 — Token Trending Score
+# ============================================================
+
+_TS_CSV_DIR = Path.home() / ".cache" / "birdeye-trending-csv"
+_MOMENTUM_SNAPSHOT_DIR = _TS_CSV_DIR / "momentum_snapshots"
+
+
+def _ts_snapshot_path(chain: str, address: str) -> Path:
+    """Path to the momentum snapshots CSV for a token."""
+    _MOMENTUM_SNAPSHOT_DIR.mkdir(parents=True, exist_ok=True)
+    safe_addr = "".join(c if c.isalnum() or c in "-_." else "_" for c in address[:40])
+    return _MOMENTUM_SNAPSHOT_DIR / f"{chain}_{safe_addr}_snapshots.csv"
+
+
+def _ts_load_snapshots(chain: str, address: str, max_age_hours: float = 24.0) -> list[dict]:
+    """Load collected overview snapshots for median baseline computation."""
+    fp = _ts_snapshot_path(chain, address)
+    if not fp.exists():
+        return []
+    age_h = (time.time() - fp.stat().st_mtime) / 3600.0
+    if age_h > max_age_hours:
+        return []
+    snaps = []
+    with fp.open("r", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        for row in r:
+            snaps.append({k: v for k, v in row.items()})
+    return snaps
+
+
+def _ts_fetch_creation_time(session, key, chain, address) -> int | None:
+    """Fetch token creation blockUnixTime from /defi/token_creation_info."""
+    try:
+        data, _ = _be(session, key, chain, "/defi/token_creation_info", {"address": address})
+        d = data.get("data") or {}
+        ts = d.get("blockUnixTime")
+        return int(ts) if ts else None
+    except RuntimeError:
+        return None
+
+
+def _ts_csv_path(chain: str, address: str, kind: str) -> Path:
+    """Path to a CSV cache file for raw trending-score data."""
+    _TS_CSV_DIR.mkdir(parents=True, exist_ok=True)
+    safe_addr = "".join(c if c.isalnum() or c in "-_." else "_" for c in address[:40])
+    return _TS_CSV_DIR / f"{chain}_{safe_addr}_{kind}.csv"
+
+
+def _ts_save_ohlcv_csv(chain: str, address: str, candles: list[dict],
+                       kind: str = "ohlcv_1m") -> Path:
+    """Save OHLCV candles to CSV for backtest/replay.
+
+    kind: 'ohlcv_1m' or 'ohlcv_1s'.
+    """
+    fp = _ts_csv_path(chain, address, kind)
+    with fp.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["timestamp", "open", "high", "low", "close", "volume", "volume_usd"])
+        for c in candles:
+            w.writerow([c.get("t"), c.get("o"), c.get("h"), c.get("l"),
+                        c.get("c"), c.get("v"), c.get("v_usd")])
+    return fp
+
+
+def _ts_save_liq_csv(chain: str, address: str, liq: list[dict]) -> Path:
+    """Save 1m liquidity history to CSV."""
+    fp = _ts_csv_path(chain, address, "liquidity_1m")
+    with fp.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["timestamp", "liquidity_usd"])
+        for entry in liq:
+            w.writerow([entry.get("t"), entry.get("liq")])
+    return fp
+
+
+def _ts_save_security_csv(chain: str, address: str, secd: dict) -> Path:
+    """Save security data to CSV for backtest."""
+    fp = _ts_csv_path(chain, address, "security")
+    fields = ["ownerAddress", "freezeAuthority", "mutableMetadata", "creatorPercentage",
+              "top10HolderPercent", "top10UserPercent", "isHoneypot", "lpLocked",
+              "sellTax", "buyTax"]
+    with fp.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["field", "value", "fetched_at"])
+        ts = int(time.time())
+        for field in fields:
+            val = secd.get(field)
+            w.writerow([field, json.dumps(val) if isinstance(val, (dict, list)) else val, ts])
+    return fp
+
+
+def _ts_csv_fresh(fp: Path, max_age_hours: float = 24.0) -> bool:
+    """Check if a CSV cache file is fresh (within max_age_hours)."""
+    if not fp.exists():
+        return False
+    age_h = (time.time() - fp.stat().st_mtime) / 3600.0
+    return age_h < max_age_hours
+
+
+def _ts_load_ohlcv_csv(fp: Path) -> list[dict]:
+    candles = []
+    with fp.open("r", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        for row in r:
+            candles.append({
+                "t": int(row["timestamp"]) if row.get("timestamp") else 0,
+                "o": float(row["open"]) if row.get("open") else 0.0,
+                "h": float(row["high"]) if row.get("high") else 0.0,
+                "l": float(row["low"]) if row.get("low") else 0.0,
+                "c": float(row["close"]) if row.get("close") else 0.0,
+                "v": float(row["volume"]) if row.get("volume") else 0.0,
+                "v_usd": float(row["volume_usd"]) if row.get("volume_usd") else 0.0,
+            })
+    return candles
+
+
+def _ts_load_liq_csv(fp: Path) -> list[dict]:
+    liq = []
+    with fp.open("r", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        for row in r:
+            liq.append({
+                "t": int(row["timestamp"]) if row["timestamp"] else 0,
+                "liq": float(row["liquidity_usd"]) if row["liquidity_usd"] else None,
+            })
+    return liq
+
+
+def _ts_load_security_csv(fp: Path) -> dict:
+    secd = {}
+    with fp.open("r", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        for row in r:
+            val = row["value"]
+            try:
+                secd[row["field"]] = json.loads(val)
+            except (json.JSONDecodeError, TypeError):
+                secd[row["field"]] = val
+    return secd
+
+
+def _ts_save_holder_chart_csv(chain: str, address: str, hc: list[dict]) -> Path:
+    """Save holder chart data to CSV."""
+    fp = _ts_csv_path(chain, address, "holder_chart")
+    with fp.open("w", newline="", encoding="utf-8") as f:
+        w = csv.writer(f)
+        w.writerow(["timestamp", "holder", "net_change", "percent_change"])
+        for e in hc:
+            w.writerow([
+                e.get("timestamp"), e.get("holder"),
+                e.get("net_change"), e.get("percent_change"),
+            ])
+    return fp
+
+
+def _ts_load_holder_chart_csv(fp: Path) -> list[dict]:
+    hc = []
+    with fp.open("r", encoding="utf-8") as f:
+        r = csv.DictReader(f)
+        for row in r:
+            hc.append({
+                "timestamp": int(row["timestamp"]) if row.get("timestamp") else 0,
+                "holder": float(row["holder"]) if row.get("holder") else None,
+                "net_change": float(row["net_change"]) if row.get("net_change") else None,
+                "percent_change": float(row["percent_change"]) if row.get("percent_change") else None,
+            })
+    return hc
+
+
+def _ts_save_holder_profile_csv(chain: str, address: str, hp: dict) -> Path:
+    """Save holder profile to JSON."""
+    fp = _ts_csv_path(chain, address, "holder_profile")
+    fp.write_text(json.dumps(hp, ensure_ascii=False), encoding="utf-8")
+    return fp
+
+
+def _ts_load_holder_profile_csv(fp: Path) -> dict:
+    try:
+        return json.loads(fp.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def _ts_extract_ohlcv(raw: dict) -> list[dict]:
+    """Extract normalized 1m candles from OHLCV v3 response."""
+    arr: list = []
+    if isinstance(raw, dict):
+        for k in ("data", "items", "series"):
+            v = raw.get(k)
+            if isinstance(v, list):
+                arr = v
+                break
+        if not arr and isinstance(raw.get("data"), dict):
+            d2 = raw["data"]
+            for k2 in ("items", "series", "data"):
+                v2 = d2.get(k2)
+                if isinstance(v2, list):
+                    arr = v2
+                    break
+    elif isinstance(raw, list):
+        arr = raw
+    candles = []
+    for e in arr:
+        if not isinstance(e, dict):
+            continue
+        t = (e.get("t") or e.get("time") or e.get("timestamp")
+             or e.get("unixTime") or e.get("unix_time"))
+        o = e.get("o") or e.get("open")
+        h = e.get("h") or e.get("high")
+        l = e.get("l") or e.get("low")
+        c = e.get("c") or e.get("close")
+        v = e.get("v") or e.get("volume")
+        v_usd = e.get("v_usd") or e.get("volumeUsd") or e.get("volume_usd")
+        if t is None or c is None:
+            continue
+        candles.append({"t": int(t), "o": float(o or c), "h": float(h or c),
+                        "l": float(l or c), "c": float(c),
+                        "v": float(v or 0), "v_usd": float(v_usd or 0)})
+    candles.sort(key=lambda x: x["t"])
+    return candles
+
+
+def _ts_extract_liq(raw: dict) -> list[dict]:
+    """Extract normalized 1m liquidity points from liquidity history response."""
+    arr: list = []
+    if isinstance(raw, dict):
+        for k in ("data", "items", "series", "liquidity", "history"):
+            v = raw.get(k)
+            if isinstance(v, list):
+                arr = v
+                break
+        if not arr and isinstance(raw.get("data"), dict):
+            d2 = raw["data"]
+            for k2 in ("items", "series", "data", "history", "liquidity"):
+                v2 = d2.get(k2)
+                if isinstance(v2, list):
+                    arr = v2
+                    break
+    elif isinstance(raw, list):
+        arr = raw
+    liq = []
+    for e in arr:
+        if not isinstance(e, dict):
+            continue
+        t = (e.get("t") or e.get("time") or e.get("timestamp")
+             or e.get("unixTime") or e.get("unix_time"))
+        val = None
+        for cand in ("liquidity_usd", "liquidityUsd", "liquidityUSD", "valueUsd",
+                     "valueUSD", "usdLiquidity", "liquidity", "usd", "liqUsd",
+                     "tvlC", "tvlc", "tvl"):
+            v = e.get(cand)
+            if isinstance(v, (int, float)):
+                val = float(v)
+                break
+        if t is None:
+            continue
+        liq.append({"t": int(t), "liq": val})
+    liq.sort(key=lambda x: x["t"])
+    return liq
+
+
+def _ts_color(score: float | None) -> str:
+    if score is None:
+        return "#64748b"
+    if score >= 70:
+        return "#22c55e"
+    if score >= 50:
+        return "#84cc16"
+    if score >= 30:
+        return "#f59e0b"
+    if score >= 15:
+        return "#f97316"
+    return "#ef4444"
+
+
+def cmd_trending_score(args):
+    chain = args.chain
+    address = args.address
+    n_candles = max(100, min(5000, int(getattr(args, "candles", 5000) or 5000)))
+    fmt = args.format
+    key = _load_key()
+    if not key:
+        sys.stderr.write("[token-trending-score] missing BIRDEYE_API_KEY.\n")
+        return 2
+
+    cu = 0
+    breakdown_cu: list[str] = []
+    run_id = f"ts_{chain}_{address.replace('.', '_')[:20]}_{int(time.time())}"
+
+    # ── 0) Token creation time (anchor for OHLCV/liquidity) ──
+    creation_ts = None
+    try:
+        with requests.Session() as s:
+            creation_ts = _ts_fetch_creation_time(s, key, chain, address)
+        cu += 35
+        breakdown_cu.append("creation_info=35")
+    except Exception:
+        breakdown_cu.append("creation_info=FAIL")
+
+    # ── 0b) Load collected snapshots for median baseline ──
+    snapshots = _ts_load_snapshots(chain, address)
+    if snapshots:
+        breakdown_cu.append(f"snapshots={len(snapshots)}(loaded)")
+
+    # ── 1) OHLCV v3 (1m candles) — from creation time (capped at 5000) ──
+    candles_1m: list[dict] = []
+    now = int(time.time())
+    # Use creation time if available, else n_candles lookback
+    if creation_ts and creation_ts > 0:
+        time_from = max(creation_ts, now - n_candles * 60)
+    else:
+        time_from = now - n_candles * 60
+    params = {
+        "address": address,
+        "type": "1m",
+        "time_to": now,
+        "time_from": time_from,
+    }
+    try:
+        with requests.Session() as s:
+            raw, _ms = _be(s, key, chain, "/defi/v3/ohlcv", params)
+        candles_1m = _ts_extract_ohlcv(raw)
+        step_cu = _ohlcv_v3_cu(len(candles_1m))
+        cu += step_cu
+        breakdown_cu.append(f"ohlcv_v3_1m={step_cu}")
+    except Exception as e:
+        sys.stderr.write(f"[token-trending-score] OHLCV error: {e}\n")
+        return 1
+
+    # ── 2) Liquidity history (1m) — from creation time ──
+    liq_1m: list[dict] = []
+    now = int(time.time())
+    if creation_ts and creation_ts > 0:
+        time_from = max(creation_ts, now - n_candles * 60)
+    else:
+        time_from = now - n_candles * 60
+    liq_params = {
+        "address": address,
+        "type": "1m",
+        "time_to": now,
+        "time_from": time_from,
+    }
+    liq_paths = [
+        ("/defi/v3/liquidity/history/token", liq_params, "liq_hist_v3"),
+        ("/defi/v3/liquidity-ohlc-token", liq_params, "liq_ohlc_v3"),
+    ]
+    for path, pm, tag in liq_paths:
+        try:
+            with requests.Session() as s:
+                raw_liq, _msl = _be(s, key, chain, path, pm)
+            liq_1m = _ts_extract_liq(raw_liq)
+            step_cu = 20
+            cu += step_cu
+            breakdown_cu.append(f"{tag}={step_cu}")
+            break
+        except RuntimeError:
+            continue
+    if not liq_1m:
+        breakdown_cu.append("liq=FAIL")
+
+    # ── 3) Token overview (includes=money_flow for wallet dynamics) ──
+    ovd: dict = {}
+    try:
+        with requests.Session() as s:
+            ov_raw, _mso = _be(s, key, chain, "/defi/token_overview",
+                               {"address": address, "includes": "money_flow"})
+        ovd = ov_raw.get("data") or {}
+        cu += 21
+        breakdown_cu.append("overview+mf=21")
+    except RuntimeError as e:
+        breakdown_cu.append(f"overview=FAIL({str(e)[:30]})")
+
+    # ── 3b) 1s OHLCV candles (for short-interval price/volume: 5m/15m/30m) ──
+    candles_1s: list[dict] = []
+    now = int(time.time())
+    # Fetch last 70 minutes of 1s candles (covers 2x 30m window for baseline)
+    time_from = now - 70 * 60
+    try:
+        with requests.Session() as s:
+            raw1s, _ms1s = _be(s, key, chain, "/defi/v3/ohlcv", {
+                "address": address, "type": "1s",
+                "time_to": now, "time_from": time_from,
+            })
+        candles_1s = _ts_extract_ohlcv(raw1s)
+        step_cu = _ohlcv_v3_cu(len(candles_1s))
+        cu += step_cu
+        breakdown_cu.append(f"ohlcv_1s={step_cu}")
+    except Exception as e:
+        sys.stderr.write(f"[token-trending-score] OHLCV 1s error: {e}\n")
+        breakdown_cu.append("ohlcv_1s=FAIL")
+
+    # ── 3c) Holder chart 1m (for holder growth across all intervals) ──
+    holder_chart: list[dict] = []
+    try:
+        with requests.Session() as s:
+            hc_raw, _mshc = _be(s, key, chain, "/token/v1/holder/chart", {
+                "token_address": address,
+                "chart_type": "1m",
+                "count": 100,
+                "mode": "padding",
+            })
+        holder_chart = (hc_raw.get("data") if isinstance(hc_raw, dict) else []) or []
+        cu += 30
+        breakdown_cu.append("holder_chart=30")
+    except RuntimeError as e:
+        breakdown_cu.append(f"holder_chart=FAIL({str(e)[:30]})")
+
+    # ── 3d) Holder profile (for holder health / cohort analysis) ──
+    holder_profile: dict = {}
+    try:
+        with requests.Session() as s:
+            hp_raw, _mshp = _be(s, key, chain, "/token/v1/holder-profile", {
+                "token_address": address, "limit": 20,
+            })
+        holder_profile = (hp_raw.get("data") if isinstance(hp_raw, dict) else {}) or {}
+        cu += 21
+        breakdown_cu.append("holder_profile=21")
+    except RuntimeError as e:
+        breakdown_cu.append(f"holder_profile=FAIL({str(e)[:30]})")
+
+    # ── 4) Token security ──
+    secd: dict = {}
+    try:
+        with requests.Session() as s:
+            sec_raw, _mss = _be(s, key, chain, "/defi/token_security",
+                                {"address": address})
+        secd = sec_raw.get("data") or {}
+        cu += 30
+        breakdown_cu.append("security=30")
+    except RuntimeError as e:
+        breakdown_cu.append(f"security=FAIL({str(e)[:30]})")
+
+    # ── 5) Compute trending score ──
+    result = _ts.compute_trending_score(
+        ovd, secd, snapshots, candles_1m, liq_1m,
+        candles_1s=candles_1s,
+        holder_chart=holder_chart,
+        holder_profile=holder_profile,
+    )
+
+    symbol = ovd.get("symbol") or ""
+    name = ovd.get("name") or symbol or address[:12]
+    overall = result["overall_trending_score"]
+
+    # ── Format output ──
+    intervals = result["intervals"]
+
+    if fmt == "plain":
+        print(f"Skill #22 · Token Trending Score — {symbol or address[:16]}")
+        print(f"Overall: {overall}/100" if overall is not None else "Overall: N/A")
+        print(f"Risky: {'YES' if result['is_risky'] else 'no'}  "
+              f"Holders: {result['meta']['holder_count']}  "
+              f"MCap: {_fmt_usd(result['meta']['market_cap'])}")
+        if snapshots:
+            print(f"Baseline: {len(snapshots)} snapshots (median)")
+        else:
+            print(f"Baseline: Birdeye *History* field (single previous window)")
+        print(f"\n{'Interval':<10} {'Score':>8} {'Vol':>6} {'Swap':>6} {'Price':>7} {'Liq':>6} {'Hold':>6} {'Sec':>6}")
+        print("-" * 64)
+        for iv in _ts.INTERVALS:
+            d = intervals.get(iv, {})
+            sc = d.get("trending_score")
+            if sc is None:
+                print(f"{iv:<10} {'N/A':>8}")
+                continue
+            comps = d.get("components", {})
+            print(f"{iv:<10} {sc:>8.1f} "
+                  f"{comps.get('volume', {}).get('score', 0):>6.0f} "
+                  f"{comps.get('swaps', {}).get('score', 0):>6.0f} "
+                  f"{comps.get('price', {}).get('score', 0):>7.0f} "
+                  f"{comps.get('liquidity', {}).get('score', 0):>6.0f} "
+                  f"{comps.get('holder', {}).get('score', 0):>6.0f} "
+                  f"{comps.get('security', {}).get('score', 0):>6.0f}")
+        print(f"\n⚡CU: {cu} ({', '.join(breakdown_cu)})")
+        print(f"CSV cache: {_TS_CSV_DIR}")
+        return 0
+
+    if fmt == "telegram":
+        lines = [f"*Token Trending Score* `{symbol or address[:12]}`"]
+        lines.append(f"Overall: *{overall}/100*" if overall is not None else "Overall: N/A")
+        if result["is_risky"]:
+            lines.append("⚠️ *SECURITY RISK* — score capped at 10%")
+        lines.append("```")
+        lines.append(f"{'IV':<6}{'Score':>7}{'Vol':>6}{'Swp':>6}{'Px':>6}{'Liq':>6}{'Hld':>6}{'Sec':>6}")
+        for iv in _ts.INTERVALS:
+            d = intervals.get(iv, {})
+            sc = d.get("trending_score")
+            if sc is None:
+                lines.append(f"{iv:<6}{'N/A':>7}")
+                continue
+            c = d.get("components", {})
+            lines.append(f"{iv:<6}{sc:>7.1f}"
+                         f"{c.get('volume', {}).get('score', 0):>6.0f}"
+                         f"{c.get('swaps', {}).get('score', 0):>6.0f}"
+                         f"{c.get('price', {}).get('score', 0):>6.0f}"
+                         f"{c.get('liquidity', {}).get('score', 0):>6.0f}"
+                         f"{c.get('holder', {}).get('score', 0):>6.0f}"
+                         f"{c.get('security', {}).get('score', 0):>6.0f}")
+        lines.append("```")
+        lines.append(f"⚡CU {cu} · Holders {result['meta']['holder_count']} · MCap {_fmt_usd(result['meta']['market_cap'])}")
+        print("\n".join(lines))
+        return 0
+
+    # ── rendered HTML ──
+    iv_cards = ""
+    for iv in _ts.INTERVALS:
+        d = intervals.get(iv, {})
+        sc = d.get("trending_score")
+        if sc is None:
+            iv_cards += (f'<div style="background:#0f172a;border-radius:8px;padding:10px;text-align:center">'
+                         f'<div style="font-size:11px;color:#64748b">{iv}</div>'
+                         f'<div style="font-size:18px;color:#64748b;margin-top:4px">N/A</div></div>')
+            continue
+        color = _ts_color(sc)
+        comps = d.get("components", {})
+        iv_cards += (f'<div style="background:#0f172a;border-radius:8px;padding:10px;text-align:center;border:1px solid {color}33">'
+                     f'<div style="font-size:11px;color:#64748b;text-transform:uppercase">{iv}</div>'
+                     f'<div style="font-size:24px;font-weight:800;color:{color};margin-top:2px">{sc}<span style="font-size:12px;color:#64748b">/100</span></div>'
+                     f'<div style="display:grid;grid-template-columns:repeat(6,1fr);gap:2px;margin-top:6px;font-size:8px;color:#94a3b8">'
+                     f'<div>V<br><b style="color:#e2e8f0">{comps.get("volume", {}).get("score", 0):.0f}</b></div>'
+                     f'<div>S<br><b style="color:#e2e8f0">{comps.get("swaps", {}).get("score", 0):.0f}</b></div>'
+                     f'<div>P<br><b style="color:#e2e8f0">{comps.get("price", {}).get("score", 0):.0f}</b></div>'
+                     f'<div>L<br><b style="color:#e2e8f0">{comps.get("liquidity", {}).get("score", 0):.0f}</b></div>'
+                     f'<div>H<br><b style="color:#e2e8f0">{comps.get("holder", {}).get("score", 0):.0f}</b></div>'
+                     f'<div>Sec<br><b style="color:#e2e8f0">{comps.get("security", {}).get("score", 0):.0f}</b></div>'
+                     f'</div></div>')
+
+    overall_color = _ts_color(overall)
+    risky_badge = ('<div style="display:inline-block;background:#ef444422;color:#ef4444;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;border:1px solid #ef4444">⚠️ SECURITY RISK</div>'
+                   if result["is_risky"] else
+                   '<div style="display:inline-block;background:#22c55e22;color:#22c55e;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;border:1px solid #22c55e">✓ Clean</div>')
+
+    # Security breakdown
+    sec_penalties = result["security"].get("penalties", [])
+    sec_html = ""
+    if sec_penalties:
+        for p in sec_penalties:
+            sec_html += f'<div style="font-size:11px;color:#f97316;padding:1px 0">{p["delta"]} {p["name"]} — {p["detail"]}</div>'
+    else:
+        sec_html = '<div style="font-size:11px;color:#22c55e">No penalties</div>'
+
+    html = f'''<div style="font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,Helvetica,Arial,sans-serif;background:#0a0e1a;color:#e2e8f0;padding:16px;border-radius:12px;max-width:720px">
+<div style="font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:1px;margin-bottom:4px">Skill #22 · Token Trending Score</div>
+<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+  <div style="font-size:20px;font-weight:700">{name} <span style="color:#64748b;font-size:14px">${symbol}</span></div>
+  <div style="text-align:right">
+    <div style="font-size:30px;font-weight:800;color:{overall_color}">{overall if overall is not None else 'N/A'}<span style="font-size:14px;color:#64748b">/100</span></div>
+    <div style="font-size:10px;color:#64748b">overall</div>
+  </div>
+</div>
+<div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:11px;color:#64748b">
+  {risky_badge}
+  <span>Holders: <b style="color:#e2e8f0">{result['meta']['holder_count']}</b></span>
+  <span>MCap: <b style="color:#e2e8f0">{_fmt_usd(result['meta']['market_cap'])}</b></span>
+  <span class="copy-addr" data-copy-addr="{address}" style="cursor:pointer;user-select:none" title="Click to copy">{address[:18]}.. 📋</span>
+</div>
+<div style="display:grid;grid-template-columns:repeat(8,1fr);gap:8px;margin-bottom:14px">{iv_cards}</div>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+  <div style="background:#0f172a;border-radius:8px;padding:10px">
+    <div style="font-size:11px;color:#64748b;text-transform:uppercase;margin-bottom:6px">Weights (tunable)</div>
+    <div style="font-size:11px;color:#94a3b8">Vol {int(result['weights']['volume']*100)}% · Swap {int(result['weights']['swaps']*100)}% · Price {int(result['weights']['price']*100)}% · Liq {int(result['weights']['liquidity']*100)}% · Hold {int(result['weights']['holder']*100)}% · Sec {int(result['weights']['security']*100)}%</div>
+  </div>
+  <div style="background:#0f172a;border-radius:8px;padding:10px">
+    <div style="font-size:11px;color:#64748b;text-transform:uppercase;margin-bottom:6px">Security</div>
+    {sec_html}
+  </div>
+</div>
+<div style="font-size:10px;color:#475569;margin-top:10px">Growth Score: G=(cur+ε)/(baseline+ε) · score=100·ln(1+G)/ln(16) · Short intervals (5m/15m/30m) use 1s OHLCV candles · Holder growth from /token/v1/holder/chart 1m · Holder health from /token/v1/holder-profile</div>
+</div>'''
+
+    envelope = {
+        "schemaVersion": 1, "kind": "token-trending-score-v1", "run_id": run_id,
+        "cu_used": cu, "params": {"chain": chain, "address": address,
+                                   "candles": n_candles, "argv": sys.argv[1:]},
+        "symbol": symbol, "name": name,
+        "overall_trending_score": overall,
+        "intervals": intervals,
+        "is_risky": result["is_risky"],
+        "security": result["security"],
+        "weights": result["weights"],
+        "meta": result["meta"],
+        "cu_breakdown": breakdown_cu,
+        "html": html,
+    }
+
+    # Persist to cache for History tab
+    cdir = _cache_dir(getattr(args, "cache_dir", None))
+    plain_lines = [
+        f"Skill #22 · Token Trending Score — {symbol or address[:16]}",
+        (f"Overall: {overall}/100" if overall is not None else "Overall: N/A"),
+        f"Risky: {'YES' if result['is_risky'] else 'no'}  Holders: {result['meta']['holder_count']}  MCap: {_fmt_usd(result['meta']['market_cap'])}",
+        (f"Baseline: {len(snapshots)} snapshots (median)" if snapshots else "Baseline: Birdeye *History* field (single previous window)"),
+        "",
+        f"{'Interval':<10} {'Score':>8} {'Vol':>6} {'Swap':>6} {'Price':>7} {'Liq':>6} {'Hold':>6} {'Sec':>6}",
+        "-" * 64,
+    ]
+    plain_lines.extend(
+        f"{iv:<10} {'N/A':>8}" if intervals.get(iv, {}).get('trending_score') is None else
+        f"{iv:<10} {intervals[iv]['trending_score']:>8.1f} "
+        f"{intervals[iv].get('components', {}).get('volume', {}).get('score', 0):>6.0f} "
+        f"{intervals[iv].get('components', {}).get('swaps', {}).get('score', 0):>6.0f} "
+        f"{intervals[iv].get('components', {}).get('price', {}).get('score', 0):>7.0f} "
+        f"{intervals[iv].get('components', {}).get('liquidity', {}).get('score', 0):>6.0f} "
+        f"{intervals[iv].get('components', {}).get('holder', {}).get('score', 0):>6.0f} "
+        f"{intervals[iv].get('components', {}).get('security', {}).get('score', 0):>6.0f}"
+        for iv in _ts.INTERVALS
+    )
+    plain_lines.extend([
+        "",
+        f"⚡CU: {cu} ({', '.join(breakdown_cu)})",
+        f"CSV cache: {_TS_CSV_DIR}",
+    ])
+    out_plain = "\n".join(plain_lines)
+
+    tg_lines = [f"*Token Trending Score* `{symbol or address[:12]}`"]
+    tg_lines.append(f"Overall: *{overall}/100*" if overall is not None else "Overall: N/A")
+    if result["is_risky"]:
+        tg_lines.append("⚠️ *SECURITY RISK* — score capped at 10%")
+    tg_lines.append("```")
+    tg_lines.append(f"{'IV':<6}{'Score':>7}{'Vol':>6}{'Swp':>6}{'Px':>6}{'Liq':>6}{'Hld':>6}{'Sec':>6}")
+    for iv in _ts.INTERVALS:
+        d = intervals.get(iv, {})
+        sc = d.get("trending_score")
+        if sc is None:
+            tg_lines.append(f"{iv:<6}{'N/A':>7}")
+            continue
+        c = d.get("components", {})
+        tg_lines.append(f"{iv:<6}{sc:>7.1f}"
+                        f"{c.get('volume', {}).get('score', 0):>6.0f}"
+                        f"{c.get('swaps', {}).get('score', 0):>6.0f}"
+                        f"{c.get('price', {}).get('score', 0):>6.0f}"
+                        f"{c.get('liquidity', {}).get('score', 0):>6.0f}"
+                        f"{c.get('holder', {}).get('score', 0):>6.0f}"
+                        f"{c.get('security', {}).get('score', 0):>6.0f}")
+    tg_lines.append("```")
+    tg_lines.append(f"⚡CU {cu} · Holders {result['meta']['holder_count']} · MCap {_fmt_usd(result['meta']['market_cap'])}")
+    out_telegram = "\n".join(tg_lines)
+    out_raw_json = json.dumps(envelope, ensure_ascii=False)
+    out_rendered_json = json.dumps(envelope, ensure_ascii=False)
+    file_payload = {
+        "runId": run_id, "kind": "token-trending-score-v1", "cached": False,
+        "cu_used_total": cu, "cu_breakdown": breakdown_cu,
+        "params": envelope["params"],
+        "symbol": symbol, "name": name,
+        "overall_trending_score": overall,
+        "snapshot_time": int(time.time()),
+        "rendered_plain": out_plain,
+        "rendered_telegram": out_telegram,
+        "rendered_raw-json": out_raw_json,
+        "rendered_rendered": out_rendered_json,
+        "out": out_plain,
+    }
+    _write_cache(cdir, run_id, file_payload)
+    sys.stdout.write(f"#RUN_ID {run_id}\ttoken-trending-score\tcu={cu}\n")
+
+    if fmt == "raw-json":
+        print(out_raw_json)
+        return 0
+
+    print(out_rendered_json)
+    return 0
+
+
+def cmd_junk_predict(args):
+    """Skill #23 — Junk Token Prediction (ML classifier).
+
+    Fetches /defi/token_overview for each token → extracts mcap/fdv/liquidity/
+    v24hUSD/buy24h+sell24h/uniqueWallet24h → runs trained LR model → junk score.
+    """
+    chain = args.chain
+    raw_tokens = (args.tokens or "").strip()
+    fmt = args.format
+    # Threshold is decided by the model (lr_params.json), not by the user.
+    threshold = float(_jml._get_model().get("threshold", 95.0))
+    key = _load_key()
+    if not key:
+        sys.stderr.write("[junk-predict] missing BIRDEYE_API_KEY.\n")
+        return 2
+    if not raw_tokens:
+        sys.stderr.write("[junk-predict] --tokens is required.\n")
+        return 2
+
+    # Parse token list: comma, newline, or whitespace separated
+    addresses: list[str] = []
+    for chunk in raw_tokens.replace("\n", ",").split(","):
+        addr = chunk.strip()
+        if addr:
+            addresses.append(addr)
+    if not addresses:
+        sys.stderr.write("[junk-predict] no valid token addresses found.\n")
+        return 2
+
+    cu = 0
+    breakdown_cu: list[str] = []
+    results: list[dict] = []
+
+    for addr in addresses:
+        entry: dict = {"address": addr, "symbol": "", "name": "", "error": None}
+        try:
+            with requests.Session() as s:
+                ov_raw, _ms = _be(s, key, chain, "/defi/token_overview",
+                                  {"address": addr})
+            ovd = (ov_raw.get("data") if isinstance(ov_raw, dict) else {}) or {}
+            cu += 21
+            if not breakdown_cu or "overview=21" not in breakdown_cu[-1]:
+                pass
+            entry["symbol"] = ovd.get("symbol") or ""
+            entry["name"] = ovd.get("name") or entry["symbol"] or addr[:12]
+            entry["mcap"] = _jml._to_float(ovd.get("marketCap"))
+            entry["fdv"] = _jml._to_float(ovd.get("fdv"))
+            entry["liquidity"] = _jml._to_float(ovd.get("liquidity"))
+            entry["vol_24h"] = _jml._to_float(ovd.get("v24hUSD"))
+            # tx_24h: prefer trade24h (list/overview field), fallback to buy24h+sell24h
+            trade24 = _jml._to_float(ovd.get("trade24h"))
+            if trade24 is not None:
+                entry["tx_24h"] = trade24
+            else:
+                buy24 = _jml._to_float(ovd.get("buy24h")) or 0.0
+                sell24 = _jml._to_float(ovd.get("sell24h")) or 0.0
+                entry["tx_24h"] = buy24 + sell24 if (buy24 or sell24) else None
+            entry["trader_24h"] = _jml._to_float(ovd.get("uniqueWallet24h"))
+            # Extra display fields
+            entry["price"] = _jml._to_float(ovd.get("price"))
+            entry["holder"] = _jml._to_float(ovd.get("holder"))
+            entry["number_markets"] = _jml._to_float(ovd.get("numberMarkets"))
+            entry["price_change_24h_pct"] = _jml._to_float(ovd.get("priceChange24hPercent"))
+            entry["vol_change_24h_pct"] = _jml._to_float(ovd.get("v24hChangePercent"))
+
+            pred = _jml.predict(
+                mcap=entry["mcap"], fdv=entry["fdv"],
+                liquidity=entry["liquidity"], vol_24h=entry["vol_24h"],
+                tx_24h=entry["tx_24h"], trader_24h=entry["trader_24h"],
+                threshold=threshold,
+            )
+            entry["junk_score"] = pred["score"]
+            entry["is_junk"] = pred["is_junk"]
+            entry["features"] = pred["features"]
+        except Exception as e:
+            entry["error"] = str(e)[:200]
+            entry["junk_score"] = None
+            entry["is_junk"] = None
+        results.append(entry)
+
+    breakdown_cu.append(f"overview=21x{len(addresses)}")
+
+    run_id = f"junk_{chain}_{int(time.time())}"
+
+    # ── Format: plain ──
+    if fmt == "plain":
+        print(f"Skill #23 · Junk Token Prediction — {chain.upper()}")
+        print(f"Threshold: {threshold}/100")
+        print(f"{'#':>3} {'Symbol':<12} {'Score':>7} {'Junk?':>7} {'MCap':>12} {'Liq':>12} {'Vol24h':>12} {'Tx24h':>8} {'Trader':>8}")
+        print("-" * 95)
+        for i, r in enumerate(results, 1):
+            if r.get("error"):
+                print(f"{i:>3} {r['address'][:12]:<12} ERROR: {r['error']}")
+                continue
+            sym = (r.get("symbol") or "?")[:12]
+            sc = f"{r['junk_score']:.1f}" if r["junk_score"] is not None else "N/A"
+            junk = "JUNK" if r.get("is_junk") else "ok"
+            mc = _fmt_usd(r.get("mcap"))
+            liq = _fmt_usd(r.get("liquidity"))
+            vol = _fmt_usd(r.get("vol_24h"))
+            tx = f"{int(r['tx_24h']):,}" if r.get("tx_24h") is not None else "N/A"
+            tr = f"{int(r['trader_24h']):,}" if r.get("trader_24h") is not None else "N/A"
+            print(f"{i:>3} {sym:<12} {sc:>7} {junk:>7} {mc:>12} {liq:>12} {vol:>12} {tx:>8} {tr:>8}")
+        print(f"\n⚡CU: {cu} ({', '.join(breakdown_cu)})")
+        return 0
+
+    # ── Build envelope ──
+    n_junk = sum(1 for r in results if r.get("is_junk"))
+    envelope = {
+        "schemaVersion": 1, "kind": "junk-predict-v1", "run_id": run_id,
+        "cu_used": cu, "params": {"chain": chain, "tokens": addresses,
+                                  "threshold": threshold, "argv": sys.argv[1:]},
+        "threshold": threshold,
+        "n_tokens": len(results),
+        "n_junk": n_junk,
+        "results": results,
+        "cu_breakdown": breakdown_cu,
+    }
+
+    # ── Rendered HTML ──
+    def _fmt(v):
+        if v is None:
+            return "N/A"
+        return _fmt_usd(v)
+
+    cards_html = ""
+    for r in results:
+        if r.get("error"):
+            cards_html += (f'<div style="background:#1a1a2e;border:1px solid #ef4444;border-radius:12px;padding:16px;margin-bottom:12px">'
+                           f'<div style="font-weight:700;color:#ef4444">{r["address"][:16]}…</div>'
+                           f'<div style="font-size:12px;color:#94a3b8;margin-top:4px">Error: {r["error"]}</div></div>')
+            continue
+        sym = r.get("symbol") or "?"
+        name = r.get("name") or sym
+        is_junk = r.get("is_junk", False)
+        score = r.get("junk_score", 0) or 0
+        score_color = "#ef4444" if is_junk else ("#f0b429" if score >= 50 else "#2ecc71")
+        badge_color = "#ef4444" if is_junk else "#2ecc71"
+        badge_text = "🚫 JUNK" if is_junk else "✅ OK"
+
+        # Feature highlights
+        feats = r.get("features", {})
+        val_liq_gap = feats.get("val_liq_gap", 0)
+        gap_color = "#ef4444" if val_liq_gap > 3 else ("#f0b429" if val_liq_gap > 1.5 else "#2ecc71")
+
+        # Color helpers for % changes
+        def _pct_color(v):
+            if v is None:
+                return "#8a93a6"
+            return "#2ecc71" if v >= 0 else "#ef4444"
+
+        def _fmt_pct(v):
+            if v is None:
+                return "N/A"
+            return f"{'+' if v >= 0 else ''}{v:.2f}%"
+
+        def _fmt_price(v):
+            if v is None:
+                return "N/A"
+            if v >= 1:
+                return f"${v:,.4f}"
+            return f"${v:.8f}"
+
+        def _fmt_int(v):
+            if v is None:
+                return "N/A"
+            return f"{int(v):,}"
+
+        cards_html += f'''<div style="background:#171a21;border:1px solid {'#ef4444' if is_junk else '#262b36'};border-radius:12px;padding:16px;margin-bottom:12px">
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+    <div>
+      <div style="font-size:18px;font-weight:800;color:#e6e8ef">{html.escape(name)}</div>
+      <div style="font-size:11px;color:#8a93a6;font-family:ui-monospace,monospace">{r["address"]}</div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:28px;font-weight:900;color:{score_color}">{score:.1f}<span style="font-size:12px;color:#8a93a6">/100</span></div>
+      <div style="display:inline-block;background:{badge_color};color:#000;font-weight:800;font-size:11px;padding:2px 10px;border-radius:999px;margin-top:4px">{badge_text}</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:8px">
+    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">MCap</div>
+      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt(r.get("mcap"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">FDV</div>
+      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt(r.get("fdv"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Liquidity</div>
+      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt(r.get("liquidity"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Vol 24h</div>
+      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt(r.get("vol_24h"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Price</div>
+      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt_price(r.get("price"))}</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:8px;margin-bottom:10px">
+    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Tx 24h</div>
+      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt_int(r.get("tx_24h"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Holders</div>
+      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt_int(r.get("holder"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Markets</div>
+      <div style="font-size:14px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt_int(r.get("number_markets"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Price Δ24h</div>
+      <div style="font-size:14px;font-weight:700;color:{_pct_color(r.get('price_change_24h_pct'))};margin-top:2px">{_fmt_pct(r.get("price_change_24h_pct"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:8px;padding:8px;text-align:center">
+      <div style="font-size:10px;color:#8a93a6;text-transform:uppercase">Vol Δ24h</div>
+      <div style="font-size:14px;font-weight:700;color:{_pct_color(r.get('vol_change_24h_pct'))};margin-top:2px">{_fmt_pct(r.get("vol_change_24h_pct"))}</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">val-liq gap: <span style="color:{gap_color};font-weight:700">{val_liq_gap:.2f}</span></div>
+    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">liq/mcap: <span style="color:#e6e8ef;font-weight:700">{(feats.get("liq_to_val",0)*100):.2f}%</span></div>
+    <div style="font-size:11px;background:#0f1115;padding:3px 10px;border-radius:999px;color:#94a3b8">vol/mcap: <span style="color:#e6e8ef;font-weight:700">{(feats.get("vol_to_val",0)*100):.2f}%</span></div>
+  </div>
+</div>'''
+
+    summary_badge = ""
+    if n_junk > 0:
+        summary_badge = (f'<div style="background:#1a1a2e;border:1px solid #ef4444;border-radius:10px;padding:12px;margin-bottom:14px">'
+                         f'<span style="color:#ef4444;font-weight:800">⚠ {n_junk}/{len(results)} token được ML phân loại là JUNK</span> '
+                         f'(ngưỡng {threshold}/100)</div>')
+    else:
+        summary_badge = (f'<div style="background:#0f1f15;border:1px solid #2ecc71;border-radius:10px;padding:12px;margin-bottom:14px">'
+                         f'<span style="color:#2ecc71;font-weight:800">✅ {len(results)}/{len(results)} token OK</span> '
+                         f'(không vượt ngưỡng {threshold}/100)</div>')
+
+    html_out = (f'<div style="max-width:820px;margin:0 auto">'
+                f'<div style="font-size:20px;font-weight:800;color:#e6e8ef;margin-bottom:4px">🗑️ Junk Token Prediction</div>'
+                f'<div style="font-size:12px;color:#8a93a6;margin-bottom:14px">{chain.upper()} · {len(results)} token · ngưỡng {threshold}/100 · model: Logistic Regression (16 features)</div>'
+                f'{summary_badge}'
+                f'{cards_html}'
+                f'<div style="font-size:10px;color:#475569;margin-top:10px">Features: log_val, log_liq, log_vol, log_tx, log_trader, val_liq_gap, val_vol_gap, liq_vol_gap, liq_to_val, vol_to_val, vol_to_liq, vol_per_tx, has_val, has_liq, has_vol, is_dead</div>'
+                f'</div>')
+
+    envelope["html"] = html_out
+
+    # Persist to cache
+    cdir = _cache_dir(getattr(args, "cache_dir", None))
+    file_payload = {
+        "runId": run_id, "kind": "junk-predict-v1", "cached": False,
+        "cu_used_total": cu, "cu_breakdown": breakdown_cu,
+        "params": envelope["params"],
+        "snapshot_time": int(time.time()),
+        "rendered_raw-json": json.dumps(envelope, ensure_ascii=False),
+        "out": json.dumps(envelope, ensure_ascii=False),
+    }
+    _write_cache(cdir, run_id, file_payload)
+    sys.stdout.write(f"#RUN_ID {run_id}\tjunk-predict\tcu={cu}\n")
+
+    if fmt == "raw-json":
+        print(json.dumps(envelope, ensure_ascii=False))
+        return 0
+
+    print(json.dumps(envelope, ensure_ascii=False))
+    return 0
+
+
+def cmd_junk_quick_test(args):
+    """Skill #23 — Junk Quick Test (1 scroll call → random N tokens → ML).
+
+    Fetches up to 5000 tokens via /defi/v3/token/list/scroll (300 CU), randomly
+    picks N tokens, runs the trained LR model directly on the list fields
+    (market_cap, fdv, liquidity, volume_24h_usd, trade_24h_count, holder).
+    No per-token /defi/token_overview call → very cheap for bulk screening.
+    """
+    chain = args.chain
+    n_pick = max(1, min(int(getattr(args, "num", 30)), 500))
+    scroll_limit = max(1, min(int(getattr(args, "limit", 5000)), 5000))
+    sort_by = getattr(args, "sort_by", "liquidity")
+    sort_type = getattr(args, "sort_type", "desc")
+    platform = getattr(args, "platform", None)
+    min_liq = getattr(args, "min_liquidity", None)
+    max_liq = getattr(args, "max_liquidity", None)
+    min_mcap = getattr(args, "min_market_cap", None)
+    max_mcap = getattr(args, "max_market_cap", None)
+    # Threshold is decided by the model (lr_params.json), not by the user.
+    threshold = float(_jml._get_model().get("threshold", 95.0))
+    fmt = args.format
+    key = _load_key()
+    if not key:
+        sys.stderr.write("[junk-quick-test] missing BIRDEYE_API_KEY.\n")
+        return 2
+
+    run_id = f"junkqt_{chain}_{int(time.time())}"
+    cu = 0
+    breakdown_cu: list[str] = []
+
+    # 1) Single scroll call → up to 5000 tokens
+    params: dict[str, Any] = {
+        "limit": scroll_limit,
+        "sort_by": sort_by,
+        "sort_type": sort_type,
+    }
+    if platform:
+        params["platform_name"] = platform
+    if min_liq is not None:
+        params["min_liquidity"] = min_liq
+    if max_liq is not None:
+        params["max_liquidity"] = max_liq
+    if min_mcap is not None:
+        params["min_market_cap"] = min_mcap
+    if max_mcap is not None:
+        params["max_market_cap"] = max_mcap
+
+    try:
+        with requests.Session() as s:
+            data, _ms = _be(s, key, chain, "/defi/v3/token/list/scroll", params)
+    except Exception as e:
+        sys.stderr.write(f"[junk-quick-test] scroll fetch failed: {e}\n")
+        return 1
+    cu += 300
+    breakdown_cu.append(f"scroll=300x1")
+
+    d = data.get("data") if isinstance(data, dict) else {}
+    items = (d.get("items") if isinstance(d, dict) else None) or []
+    total = len(items)
+    if total == 0:
+        sys.stderr.write("[junk-quick-test] no tokens returned from scroll.\n")
+        return 1
+
+    # 2) Randomly pick N tokens
+    pick_count = min(n_pick, total)
+    picked = random.sample(items, pick_count) if pick_count < total else items
+
+    # 3) Run ML on each token using list data
+    results: list[dict] = []
+    n_junk = 0
+    for t in picked:
+        addr = t.get("address", "")
+        entry: dict[str, Any] = {
+            "address": addr,
+            "symbol": t.get("symbol") or t.get("symbols") or "",
+            "name": t.get("name") or t.get("symbol") or addr[:12],
+            "error": None,
+        }
+        try:
+            mcap = _jml._to_float(t.get("market_cap"))
+            fdv = _jml._to_float(t.get("fdv"))
+            liq = _jml._to_float(t.get("liquidity"))
+            vol24 = _jml._to_float(t.get("volume_24h_usd"))
+            tx24 = _jml._to_float(t.get("trade_24h_count"))
+            holder = _jml._to_float(t.get("holder"))
+            price = _jml._to_float(t.get("price"))
+            price_chg24 = _jml._to_float(t.get("price_change_24h_percent"))
+            vol_chg24 = _jml._to_float(t.get("volume_24h_change_percent"))
+            list_time = t.get("recent_listing_time")
+
+            entry["mcap"] = mcap
+            entry["fdv"] = fdv
+            entry["liquidity"] = liq
+            entry["vol_24h"] = vol24
+            entry["tx_24h"] = tx24
+            entry["trader_24h"] = holder
+            entry["price"] = price
+            entry["price_change_24h"] = price_chg24
+            entry["volume_change_24h"] = vol_chg24
+            entry["holder"] = holder
+            entry["number_markets"] = _jml._to_float(t.get("numberMarkets") or t.get("number_markets"))
+            entry["recent_listing_time"] = list_time
+
+            pred = _jml.predict(
+                mcap=mcap, fdv=fdv, liquidity=liq, vol_24h=vol24,
+                tx_24h=tx24, trader_24h=holder, threshold=threshold,
+            )
+            entry["junk_score"] = pred["score"]
+            entry["is_junk"] = pred["is_junk"]
+            entry["features"] = pred["features"]
+            if pred["is_junk"]:
+                n_junk += 1
+        except Exception as e:
+            entry["error"] = str(e)
+        results.append(entry)
+
+    # ── Output ──
+    envelope: dict[str, Any] = {
+        "schemaVersion": 1, "kind": "junk-quick-test-v1", "run_id": run_id,
+        "cu_used": cu, "params": {
+            "chain": chain, "n_pick": pick_count, "scroll_total": total,
+            "scroll_limit": scroll_limit, "sort_by": sort_by, "sort_type": sort_type,
+            "platform": platform, "min_liquidity": min_liq, "max_liquidity": max_liq,
+            "min_market_cap": min_mcap, "max_market_cap": max_mcap,
+            "threshold": threshold,
+        },
+        "threshold": threshold,
+        "n_tokens": len(results), "n_junk": n_junk,
+        "scroll_total": total,
+        "results": results,
+        "cu_breakdown": breakdown_cu,
+    }
+
+    # ── Plain table ──
+    if fmt == "plain":
+        lines = [f"Skill #23 · Junk Quick Test — {chain.upper()}",
+                 f"Scroll: {total} tokens → picked {pick_count} random · ngưỡng {threshold}/100",
+                 f"  # {'Symbol':<12} {'Score':>6} {'Junk?':>6} {'MCap':>12} {'Liq':>12} {'Vol24h':>12} {'Tx24h':>9} {'Holder':>9}",
+                 "-" * 95]
+        for i, r in enumerate(results, 1):
+            if r.get("error"):
+                lines.append(f"  {i:<3} {r['address'][:12]:<12}  ERROR: {r['error'][:40]}")
+                continue
+            tx_s = f"{int(r['tx_24h']):,}" if r.get("tx_24h") is not None else "N/A"
+            hd_s = f"{int(r['holder']):,}" if r.get("holder") is not None else "N/A"
+            lines.append(
+                f"  {i:<3} {(r.get('symbol') or '?')[:12]:<12} "
+                f"{r.get('junk_score', 0):>6.1f} "
+                f"{'JUNK' if r.get('is_junk') else 'ok':>6} "
+                f"{_fmt_usd(r.get('mcap')):>12} "
+                f"{_fmt_usd(r.get('liquidity')):>12} "
+                f"{_fmt_usd(r.get('vol_24h')):>12} "
+                f"{tx_s:>9} "
+                f"{hd_s:>9}"
+            )
+        lines.append("")
+        lines.append(f"⚡CU: {cu} (scroll=300x1)")
+        sys.stdout.write("\n".join(lines) + "\n")
+        cdir = _cache_dir(getattr(args, "cache_dir", None))
+        _write_cache(cdir, run_id, {
+            "runId": run_id, "kind": "junk-quick-test-v1", "cached": False,
+            "cu_used_total": cu, "cu_breakdown": breakdown_cu,
+            "params": envelope["params"], "snapshot_time": int(time.time()),
+            "rendered_raw-json": json.dumps(envelope, ensure_ascii=False),
+            "out": json.dumps(envelope, ensure_ascii=False),
+        })
+        sys.stdout.write(f"#RUN_ID {run_id}\tjunk-quick-test\tcu={cu}\n")
+        return 0
+
+    # ── Rendered HTML ──
+    def _fmt(v):
+        if v is None:
+            return "N/A"
+        return _fmt_usd(v)
+
+    def _fmt_int(v):
+        if v is None:
+            return "N/A"
+        try:
+            return f"{int(v):,}"
+        except (ValueError, TypeError):
+            return "N/A"
+
+    def _fmt_pct(v):
+        if v is None:
+            return "N/A"
+        sign = "+" if v > 0 else ""
+        color = "#2ecc71" if v > 0 else ("#ef4444" if v < 0 else "#94a3b8")
+        return f'<span style="color:{color};font-weight:700">{sign}{v:.2f}%</span>'
+
+    cards_html = ""
+    for r in results:
+        if r.get("error"):
+            cards_html += (f'<div style="background:#1a1a2e;border:1px solid #ef4444;border-radius:12px;padding:14px;margin-bottom:10px">'
+                           f'<div style="font-weight:700;color:#ef4444">{r["address"][:16]}…</div>'
+                           f'<div style="font-size:12px;color:#94a3b8;margin-top:4px">Error: {r["error"]}</div></div>')
+            continue
+        sym = r.get("symbol") or "?"
+        name = r.get("name") or sym
+        is_junk = r.get("is_junk", False)
+        score = r.get("junk_score", 0) or 0
+        score_color = "#ef4444" if is_junk else ("#f0b429" if score >= 50 else "#2ecc71")
+        badge_color = "#ef4444" if is_junk else "#2ecc71"
+        badge_text = "🚫 JUNK" if is_junk else "✅ OK"
+
+        feats = r.get("features", {})
+        val_liq_gap = feats.get("val_liq_gap", 0)
+        gap_color = "#ef4444" if val_liq_gap > 3 else ("#f0b429" if val_liq_gap > 1.5 else "#2ecc71")
+
+        cards_html += f'''<div style="background:#171a21;border:1px solid {'#ef4444' if is_junk else '#262b36'};border-radius:12px;padding:14px;margin-bottom:10px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+    <div style="min-width:0">
+      <div style="font-size:16px;font-weight:800;color:#e6e8ef;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:320px">{html.escape(name)} <span style="color:#8a93a6;font-weight:600;font-size:13px">${html.escape(sym)}</span></div>
+      <div style="font-size:10px;color:#64748b;font-family:ui-monospace,monospace;margin-top:2px">{r["address"]}</div>
+    </div>
+    <div style="text-align:right;flex-shrink:0;margin-left:10px">
+      <div style="font-size:26px;font-weight:900;color:{score_color}">{score:.1f}<span style="font-size:11px;color:#8a93a6">/100</span></div>
+      <div style="display:inline-block;background:{badge_color};color:#000;font-weight:800;font-size:11px;padding:2px 10px;border-radius:999px;margin-top:3px">{badge_text}</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-bottom:8px">
+    <div style="background:#0f1115;border-radius:7px;padding:7px;text-align:center">
+      <div style="font-size:9px;color:#8a93a6;text-transform:uppercase">MCap</div>
+      <div style="font-size:13px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt(r.get("mcap"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:7px;padding:7px;text-align:center">
+      <div style="font-size:9px;color:#8a93a6;text-transform:uppercase">FDV</div>
+      <div style="font-size:13px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt(r.get("fdv"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:7px;padding:7px;text-align:center">
+      <div style="font-size:9px;color:#8a93a6;text-transform:uppercase">Liquidity</div>
+      <div style="font-size:13px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt(r.get("liquidity"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:7px;padding:7px;text-align:center">
+      <div style="font-size:9px;color:#8a93a6;text-transform:uppercase">Vol 24h</div>
+      <div style="font-size:13px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt(r.get("vol_24h"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:7px;padding:7px;text-align:center">
+      <div style="font-size:9px;color:#8a93a6;text-transform:uppercase">Price</div>
+      <div style="font-size:13px;font-weight:700;color:#e6e8ef;margin-top:2px">{('$' + format(r["price"], '.8g')) if r.get("price") is not None else 'N/A'}</div>
+    </div>
+  </div>
+  <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px">
+    <div style="background:#0f1115;border-radius:7px;padding:6px;text-align:center">
+      <div style="font-size:9px;color:#8a93a6;text-transform:uppercase">Tx 24h</div>
+      <div style="font-size:12px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt_int(r.get("tx_24h"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:7px;padding:6px;text-align:center">
+      <div style="font-size:9px;color:#8a93a6;text-transform:uppercase">Holders</div>
+      <div style="font-size:12px;font-weight:700;color:#e6e8ef;margin-top:2px">{_fmt_int(r.get("holder"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:7px;padding:6px;text-align:center">
+      <div style="font-size:9px;color:#8a93a6;text-transform:uppercase">Price Δ24h</div>
+      <div style="font-size:12px;font-weight:700;margin-top:2px">{_fmt_pct(r.get("price_change_24h"))}</div>
+    </div>
+    <div style="background:#0f1115;border-radius:7px;padding:6px;text-align:center">
+      <div style="font-size:9px;color:#8a93a6;text-transform:uppercase">Vol Δ24h</div>
+      <div style="font-size:12px;font-weight:700;margin-top:2px">{_fmt_pct(r.get("volume_change_24h"))}</div>
+    </div>
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
+    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">val-liq gap: <span style="color:{gap_color};font-weight:700">{val_liq_gap:.2f}</span></div>
+    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">liq/mcap: <span style="color:#e6e8ef;font-weight:700">{(feats.get("liq_to_val",0)*100):.2f}%</span></div>
+    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">vol/mcap: <span style="color:#e6e8ef;font-weight:700">{(feats.get("vol_to_val",0)*100):.2f}%</span></div>
+    <div style="font-size:10px;background:#0f1115;padding:3px 9px;border-radius:999px;color:#94a3b8">listed: <span style="color:#e6e8ef;font-weight:700">{_dt.datetime.utcfromtimestamp(r["recent_listing_time"]).strftime("%Y-%m-%d") if r.get("recent_listing_time") else 'N/A'}</span></div>
+  </div>
+</div>'''
+
+    if n_junk > 0:
+        summary_badge = (f'<div style="background:#1a1a2e;border:1px solid #ef4444;border-radius:10px;padding:11px;margin-bottom:12px">'
+                         f'<span style="color:#ef4444;font-weight:800">⚠ {n_junk}/{len(results)} token JUNK</span> '
+                         f'(ngưỡng {threshold}/100) · scroll {total} tokens</div>')
+    else:
+        summary_badge = (f'<div style="background:#0f1f15;border:1px solid #2ecc71;border-radius:10px;padding:11px;margin-bottom:12px">'
+                         f'<span style="color:#2ecc71;font-weight:800">✅ {len(results)}/{len(results)} token OK</span> '
+                         f'(ngưỡng {threshold}/100) · scroll {total} tokens</div>')
+
+    filter_info = ""
+    parts = []
+    if platform: parts.append(f"platform={platform}")
+    if min_liq is not None: parts.append(f"liq≥{_fmt_usd(min_liq)}")
+    if max_liq is not None: parts.append(f"liq≤{_fmt_usd(max_liq)}")
+    if min_mcap is not None: parts.append(f"mcap≥{_fmt_usd(min_mcap)}")
+    if max_mcap is not None: parts.append(f"mcap≤{_fmt_usd(max_mcap)}")
+    if parts:
+        filter_info = f'<div style="font-size:11px;color:#64748b;margin-bottom:10px">Filters: {", ".join(parts)} · sort_by={sort_by} {sort_type}</div>'
+
+    html_out = (
+        f'<div style="max-width:860px;margin:0 auto">'
+        f'<div style="font-size:20px;font-weight:800;color:#e6e8ef;margin-bottom:3px">🗑️ Junk Quick Test</div>'
+        f'<div style="font-size:12px;color:#8a93a6;margin-bottom:10px">{chain.upper()} · {pick_count} random / {total} tokens · ngưỡng {threshold}/100 · model: Logistic Regression (16 features) · data: /defi/v3/token/list/scroll</div>'
+        f'{filter_info}'
+        f'{summary_badge}'
+        f'{cards_html}'
+        f'<div style="font-size:10px;color:#475569;margin-top:8px">Note: trade_24h_count & holder used as proxies for tx_24h & uniqueWallet24h (list endpoint). For exact per-token data use junk-predict with --tokens.</div>'
+        f'</div>'
+    )
+    envelope["html"] = html_out
+
+    cdir = _cache_dir(getattr(args, "cache_dir", None))
+    file_payload = {
+        "runId": run_id, "kind": "junk-quick-test-v1", "cached": False,
+        "cu_used_total": cu, "cu_breakdown": breakdown_cu,
+        "params": envelope["params"], "snapshot_time": int(time.time()),
+        "rendered_raw-json": json.dumps(envelope, ensure_ascii=False),
+        "out": json.dumps(envelope, ensure_ascii=False),
+    }
+    _write_cache(cdir, run_id, file_payload)
+    sys.stdout.write(f"#RUN_ID {run_id}\tjunk-quick-test\tcu={cu}\n")
+
+    if fmt == "raw-json":
+        print(json.dumps(envelope, ensure_ascii=False))
+        return 0
+
     print(json.dumps(envelope, ensure_ascii=False))
     return 0
 
