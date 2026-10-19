@@ -148,6 +148,7 @@
 <body>
 <header>
   <h1>🧪 Birdeye Skills<span class="sub">Console</span></h1>
+  <a class="btn ghost" href="/" title="Back to the landing page" style="text-decoration:none">🏠 Home</a>
   <span class="pill" id="modePill">…</span>
   <button class="histToggle" id="histToggle" title="Show / hide recent runs">🕐 Recent<span class="n" id="histToggleCnt">0</span></button>
   <div class="keybar">
@@ -392,7 +393,7 @@ async function loadMeta(){
     const j = await r.json();
     if(r.ok && typeof j.serverless !== "undefined") m = j;
   }catch(e){}
-  // Fallback: static-host console backed by deploy/server.py (no /api/meta)
+  // Fallback: local hub backend (birdeye_ui.py) — exposes /api/key-info, no /api/meta
   if(!m){
     try{
       const r = await fetch("/api/key-info", {cache:"no-store"});
@@ -426,7 +427,7 @@ function initKeyBar(){
     if(!v){ toast("Paste a key first"); return; }
     state.userKey = v;
     try{ localStorage.setItem(LS_KEY, v); }catch(e){}
-    // Best effort: also register the key server-side (works on deploy/server.py;
+    // Best effort: also register the key server-side (works on the local hub;
     // 404 on serverless backends where the per-run key is used instead).
     try{ fetch("/api/set-key",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:v})}); }catch(e){}
     $("apiKey").type = "password"; $("eyeBtn").textContent = "👁";

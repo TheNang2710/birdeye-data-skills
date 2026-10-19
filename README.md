@@ -1,15 +1,21 @@
-# 🧪 Birdeye Data Skills — Test Console
+# 🛰 Birdeye Data Skills — Hub & Test Console
 
-A self-contained local test console for running Birdeye on-chain data skills.
-Runs the CLI engine as a subprocess and renders results in a clean web UI.
+A self-contained local app for running Birdeye on-chain data skills:
+
+- **Home page** (`/`) — landing page with skill cards + setup guide.
+- **Test console** (`/test`) — runs the CLI engine as a subprocess and renders
+  results in a clean web UI (the "deploy screen").
 
 > **Local-only by design** — no source code is exposed to the browser, only
 > the test UI + JSON results. No external hosting required.
+> The **same** `deploy-vercel/public/` folder powers both the local hub
+> (port `8765`) and the Vercel deployment — one UI, one source of truth.
 
 ---
 
 ## ✨ Features
 
+- **Landing page** with skill cards, group badges and a setup guide
 - **11 skills** across 3 groups (Discover / Token / Wallet)
 - **4 output formats**: 🖥 UI · 📄 Plain · ✈️ Telegram · { } JSON
 - **History sidebar** — click any past run to replay at **0 CU** (cached)
@@ -24,16 +30,23 @@ Runs the CLI engine as a subprocess and renders results in a clean web UI.
 
 ```
 birdeye-data-skills/
-├── deploy/
-│   ├── index.html          # Test console UI (port 8899)
-│   └── server.py           # Minimal HTTP server + CLI runner
+├── deploy-vercel/
+│   ├── public/               # SHARED web app (local 8765 + Vercel)
+│   │   ├── index.html        # Landing page (skill cards + setup guide)
+│   │   ├── test.html         # Test console (deploy screen)
+│   │   ├── detail.html       # Per-skill drill view
+│   │   ├── hub.js / hub.css  # Shared front-end bundle
+│   │   └── catalog.json      # Static skill catalog (Vercel fallback)
+│   └── api/                  # Vercel serverless functions (run.py, meta.py)
 ├── birdeye-screener/
 │   ├── scripts/
-│   │   ├── birdeye_cli.py  # CLI engine (all skills)
-│   │   └── modules/        # Skill modules (wallet_data, contract_dd, kline_pattern)
-│   ├── requirements.txt    # Python dependencies
-│   └── .env.example        # API key template
-├── docs/                   # Skill workflow docs (core concepts)
+│   │   ├── birdeye_cli.py    # CLI engine (all skills)
+│   │   └── modules/          # Skill modules (wallet_data, contract_dd, kline_pattern)
+│   ├── requirements.txt      # Python dependencies
+│   └── .env.example          # API key template
+├── birdeye_ui.py             # Local hub server (serves deploy-vercel/public/)
+├── server.sh                 # One-command server control
+├── docs/                     # Skill workflow docs (core concepts)
 └── README.md
 ```
 
@@ -96,14 +109,24 @@ cp birdeye-screener/.env.example birdeye-screener/.env
 
 ### Step 4: Start the server
 
+**Option A — one-command control script (recommended):**
 ```bash
-python3 deploy/server.py --port 8899
+./server.sh start        # background  → http://127.0.0.1:8765
+./server.sh fg           # foreground  (Ctrl+C to stop)
+./server.sh watch        # auto-restart on file change
+./server.sh status       # show running state
+./server.sh stop         # stop the server
+```
+
+**Option B — run the Python server directly:**
+```bash
+python3 birdeye_ui.py --host 127.0.0.1 --port 8765 --reload
 ```
 
 You will see a log like:
 ```
-[deploy] Birdeye Test Console → http://127.0.0.1:8899
-[deploy] CLI: /path/to/birdeye-screener/scripts/birdeye_cli.py
+[UI] 🛰 Birdeye Data Skills Hub (32 skills) → http://127.0.0.1:8765
+[UI] hot reload: ON (read UI_HTML per request)
 ```
 
 ---
@@ -111,15 +134,18 @@ You will see a log like:
 ### Step 5: Open the browser
 
 ```
-http://localhost:8899
+http://localhost:8765/              # landing page (skill cards + setup guide)
+http://localhost:8765/test          # test console (run skills)
+http://localhost:8765/detail        # per-skill drill view
 ```
 
 Usage:
-1. Pick a skill from the left column (or filter by group in the top bar)
-2. Fill in the parameters in the middle form
-3. Click **▶ Run**
-4. View results in 4 tabs: 🖥 UI · 📄 Plain · ✈️ Telegram · { } JSON
-5. Click any entry in the **History** column on the right to replay (0 CU, from local cache)
+1. Open the **test console** at `/test`
+2. Pick a skill from the left column (or filter by group in the top bar)
+3. Fill in the parameters in the middle form
+4. Click **▶ Run**
+5. View results in 4 tabs: 🖥 UI · 📄 Plain · ✈️ Telegram · { } JSON
+6. Click any entry in the **History** column on the right to replay (0 CU, from local cache)
 
 ---
 
@@ -151,9 +177,9 @@ python3 scripts/birdeye_cli.py --help
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--port` | `8899` | Port to listen on |
+| `--port` | `8765` | Port to listen on |
 | `--host` | `127.0.0.1` | Bind address (use `0.0.0.0` for LAN) |
-| `--cli-path` | `../birdeye-screener/scripts/birdeye_cli.py` | Path to CLI engine |
+| `--reload` | off | Re-read static UI (`deploy-vercel/public/`) from disk per request |
 
 ---
 
@@ -163,9 +189,10 @@ python3 scripts/birdeye_cli.py --help
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  Browser (localhost:8899)                             │
+│  Browser (localhost:8765)                             │
 │  ┌────────────────────────────────────────────────┐  │
-│  │  Skill list → Form → Run button                │  │
+│  │  /       → Landing page (skill cards + setup)  │  │
+│  │  /test   → Skill list → Form → Run button      │  │
 │  │  Output: UI / Plain / Telegram / JSON          │  │
 │  │  History sidebar (click → replay, 0 CU)        │  │
 │  └──────────────┬─────────────────────────────────┘  │
@@ -173,7 +200,8 @@ python3 scripts/birdeye_cli.py --help
                   │ POST /api/run  {script, argv}
                   ▼
 ┌──────────────────────────────────────────────────────┐
-│  server.py                                            │
+│  birdeye_ui.py                                        │
+│  • Serves the shared UI from deploy-vercel/public/   │
 │  • Whitelists script (only birdeye_cli)              │
 │  • Sanitizes argv (no shell metacharacters)           │
 │  • Injects BIRDEYE_API_KEY into subprocess env        │
@@ -263,11 +291,9 @@ Detailed workflow docs for each skill are in [`docs/`](docs/):
 1. **Never commit your `.env` file** — it is gitignored, but double-check.
 2. The default host is `127.0.0.1` (localhost only). Use `--host 0.0.0.0`
    only on a trusted network, behind a reverse proxy with authentication.
-3. The server only serves `index.html` — no other static files are accessible,
-   preventing source code leakage.
-4. `script` is whitelisted to `birdeye_cli` only — no arbitrary command
+3. `script` is whitelisted to `birdeye_cli` only — no arbitrary command
    execution.
-5. `argv` tokens are rejected if they contain shell metacharacters.
+4. `argv` tokens are rejected if they contain shell metacharacters.
 
 ---
 

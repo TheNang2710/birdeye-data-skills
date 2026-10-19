@@ -9,40 +9,35 @@
 
 ## Quick Start — one script (`server.sh`) · recommended
 
-Quản lý **2 server** chạy song song:
+Chỉ còn **1 server** duy nhất:
 
 | Tên | File | Port | Phục vụ |
 |---|---|---|---|
-| `hub` | `birdeye_ui.py` | **8765** | Hub Home (`/`) + Test lean (`/test`) |
-| `public` | `deploy/server.py` | **8899** | Hub Home (`/`) + Test lean (`/test`) |
+| `hub` | `birdeye_ui.py` | **8765** | Landing (`/`) + Test console (`/test`) |
 
 ```bash
 cd /Users/nguyenthenang/nang/birdeye/app/skills
 
-./server.sh start            # chạy CẢ HAI (nền) — mặc định
-./server.sh start hub        # chỉ 8765
-./server.sh start public     # chỉ 8899
-./server.sh stop             # dừng cả hai
-./server.sh restart          # dừng + chạy lại cả hai
-./server.sh fg               # chạy hub foreground (Ctrl+C để dừng)
-./server.sh fg public        # chạy public foreground
-./server.sh watch            # watch file changes + auto-restart cả hai
-./server.sh watch hub        # chỉ watch/restart 8765
-./server.sh watch public     # chỉ watch/restart 8899
-./server.sh status           # trạng thái cả hai
+./server.sh start            # chạy nền (mặc định)
+./server.sh stop             # dừng
+./server.sh restart          # dừng + chạy lại
+./server.sh fg               # chạy foreground (Ctrl+C để dừng)
+./server.sh watch            # watch file changes + auto-restart
+./server.sh status           # trạng thái
 
 # đổi host/port
-HOST=0.0.0.0 HUB_PORT=8765 PUB_PORT=8899 ./server.sh start
+HOST=0.0.0.0 PORT=8765 ./server.sh start
 
 # dev loop: poll mỗi 2s rồi tự restart khi file đổi
 WATCH_INTERVAL=2 ./server.sh watch
 ```
 
-- Sau `start` → mở `http://127.0.0.1:8765/` và `http://127.0.0.1:8899/`
-- Log nền: `tail -f /tmp/birdeye-hub.log` · `tail -f /tmp/birdeye-public.log`
-- PID file: `/tmp/birdeye-hub.pid` · `/tmp/birdeye-public.pid`
-- `watch` sẽ theo dõi các file `.py/.sh/.html/.css/.js/.md` trong `assets/`, `deploy/`, `birdeye-screener/scripts/`, `API/`, `docs/` và tự hard-restart server liên quan khi có thay đổi.
+- Sau `start` → mở `http://127.0.0.1:8765/` (landing) và `http://127.0.0.1:8765/test` (console)
+- Log nền: `tail -f /tmp/birdeye-hub.log`
+- PID file: `/tmp/birdeye-hub.pid`
+- `watch` theo dõi các file `.py/.sh/.html/.css/.js/.md` trong `deploy-vercel/public/`, `deploy-vercel/api/`, `birdeye-screener/scripts/`, `API/`, `docs/` và tự hard-restart khi có thay đổi.
 
+> UI là **một nguồn duy nhất**: `deploy-vercel/public/` — `birdeye_ui.py` serve thư mục đó cho local (8765), Vercel serve cùng thư mục đó khi deploy.
 > `server.sh` tự kill instance cũ trên cùng port trước khi start, nên dùng được như hard-restart khi sửa Handler/code.
 
 ---

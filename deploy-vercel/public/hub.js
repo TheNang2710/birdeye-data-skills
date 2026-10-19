@@ -34,21 +34,30 @@ async function loadCatalog(){
       return CATALOG;
     }
   }catch(_){}
-  const j = await fetch('/api/catalog').then(r=>r.json());
-  CATALOG = Array.isArray(j.items) ? j.items : [];
+  // Live hub endpoint first, then the static catalog shipped with the deploy.
+  for(const src of ['/api/catalog', '/catalog.json']){
+    try{
+      const r = await fetch(src, {cache:'no-store'});
+      if(!r.ok) continue;
+      const j = await r.json();
+      const items = Array.isArray(j) ? j : j.items;
+      if(Array.isArray(items) && items.length){ CATALOG = items; return CATALOG; }
+    }catch(_){}
+  }
+  CATALOG = [];
   return CATALOG;
 }
 function buildHomeUrl(filter='all'){
   const q = new URLSearchParams();
   if(filter && filter !== 'all') q.set('filter', filter);
   const s = q.toString();
-  return s ? '/home.html?'+s : '/';
+  return s ? '/?'+s : '/';
 }
 function buildDetailUrl(skillId, catId){
   const q = new URLSearchParams();
   if(skillId) q.set('skill', skillId);
   if(catId) q.set('cat', catId);
-  return '/detail.html?' + q.toString();
+  return '/detail?' + q.toString();
 }
 const LSKEY_SESSION_PASTE = 'be.key.paste';
 
@@ -320,7 +329,7 @@ function renderHome(){
     <!-- ============ A · HERO SECTION ============ -->
     <section class="homeHero" style="padding:28px 0 10px;position:relative">
       <div style="display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap">
-        <img id="homeLogo" src="/birdeye-screener/assets/birdeye-logo-official-dark.png" alt="Birdeye" style="height:42px;object-fit:contain;filter:drop-shadow(0 2px 10px rgba(0,0,0,.25))" />
+        <img id="homeLogo" src="/assets/birdeye-logo-official-dark.png" alt="Birdeye" style="height:42px;object-fit:contain;filter:drop-shadow(0 2px 10px rgba(0,0,0,.25))" />
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
           <span class="pillr" style="background:var(--tag);border:1px solid var(--line);font-weight:700;padding:6px 12px;border-radius:999px">🛰 32 Skills</span>
           <span class="pillr" style="background:var(--tag);border:1px solid var(--line);font-weight:700;padding:6px 12px;border-radius:999px;color:var(--good)">🟢 ${liveTotal} LIVE</span>
@@ -361,9 +370,9 @@ function renderHome(){
         <div class="skillCard" style="padding:20px 22px;gap:14px;min-height:auto">
           <div style="display:flex;align-items:center;gap:10px"><span style="font-size:26px">⚡</span><h3 style="margin:0;font-size:15px;font-weight:700">CLI Install (3 steps)</h3></div>
           <div class="subtle" style="font-size:12px;line-height:1.55">Python stdlib zero-dependency. Git clone → CD root → run server on port 8765. No npm/pip install required.</div>
-          <pre id="homeCmd" style="margin:0;padding:12px;border-radius:10px;background:var(--deep-bg);border:1px solid var(--line);font-size:11.5px;font-family:monospace;color:var(--text);white-space:pre-wrap;line-height:1.7;cursor:pointer;user-select:all" title="Click to copy all lines to clipboard">git clone https://github.com/user/birdeye-skills.git
-cd birdeye-skills
-python3 birdeye_ui.py --port 8765 --reload</pre>
+          <pre id="homeCmd" style="margin:0;padding:12px;border-radius:10px;background:var(--deep-bg);border:1px solid var(--line);font-size:11.5px;font-family:monospace;color:var(--text);white-space:pre-wrap;line-height:1.7;cursor:pointer;user-select:all" title="Click to copy all lines to clipboard">git clone https://github.com/TheNang2710/birdeye-data-skills.git
+cd birdeye-data-skills
+./server.sh start            # → http://127.0.0.1:8765  (landing + /test console)</pre>
           <div style="display:flex;gap:8px;align-items:center;justify-content:space-between">
             <span id="homeCopyMsg" class="subtle" style="font-size:11px">⬆ click box to copy to clipboard</span>
             <button class="btn ghost" id="homeCopyBtn" style="padding:6px 12px;font-size:12px">📋 Copy</button>
@@ -473,7 +482,7 @@ python3 birdeye_ui.py --port 8765 --reload</pre>
     (function(){
       var theme = (document.documentElement.getAttribute('data-theme')||'dark');
       var logo = $('homeLogo');
-      if(logo){ logo.src = theme==='dark' ? '/birdeye-screener/assets/birdeye-logo-official-dark.png' : '/birdeye-screener/assets/birdeye-logo-official-light.png'; }
+      if(logo){ logo.src = theme==='dark' ? '/assets/birdeye-logo-official-dark.png' : '/assets/birdeye-logo-official-light.png'; }
     })();
     // B copy command (CLI Install card)
     var doCopy = function(){

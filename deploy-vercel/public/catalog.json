@@ -1,0 +1,286 @@
+{
+ "items": [
+  {
+   "cat": "🔥 Discovery (3)",
+   "items": [
+    {
+     "id": "tl",
+     "title": "Skill #1 · Trending List",
+     "cu": "30 CU",
+     "status": "live",
+     "desc": "/defi/token_trending — hot tokens by volume/rank/liquidity"
+    },
+    {
+     "id": "tl_v3",
+     "title": "Skill #1b · V3 Token List",
+     "cu": "50 CU",
+     "status": "live",
+     "desc": "/defi/v3/token/list — min_volume filter, trade_count/holders enriched"
+    },
+    {
+     "id": "new_pair",
+     "title": "Skill #2 · New Pairs",
+     "cu": "TBD",
+     "status": "wip",
+     "desc": "Recently launched tokens sorted by age"
+    }
+   ]
+  },
+  {
+   "cat": "🛡 Token Due Diligence (5)",
+   "items": [
+    {
+     "id": "dd",
+     "title": "Skill #3 · Token DD (Should I Buy?)",
+     "cu": "71 CU",
+     "status": "live",
+     "desc": "overview+money_flow+security+SM join → A/B/C/D/F/NG rating (birdeye-dd-workflow step 10)"
+    },
+    {
+     "id": "security",
+     "title": "Skill #4 · Security + LP Concentration",
+     "cu": "75 CU",
+     "status": "wip",
+     "desc": "token_security + /holder/v1/distribution + /defi/v2/markets join = LP holder% + top50 (step 3/4/9)"
+    },
+    {
+     "id": "contract_dd",
+     "title": "Skill #5 · Contract DD",
+     "cu": "86 CU",
+     "status": "live",
+     "desc": "Composite 0-100 score: contract safety 45% + holder structure 30% + price action 25%. mint/freeze/LP/taxes + top10 + kline pattern."
+    },
+    {
+     "id": "stc",
+     "title": "Skill #6 · Spam Token Cleaner (stc)",
+     "cu": "~70 CU min · 0 holder CU (Web scrape)",
+     "status": "live",
+     "source": "birdeye",
+     "desc": "V3 token/list sweep (MC ≥ $1B AND V24h ≤ $50) × solana→robinhood→base→bsc→eth · Web scrape holder top1/top10% (0 Birdeye CU holder cost) + identity batch labels. Final sort: MC desc → Top Wallet Value desc → Liq desc → V24h asc. Export plain / telegram / rendered UI / raw-json."
+    },
+    {
+     "id": "compare",
+     "title": "Skill #7 · Multi-Token Compare Rating",
+     "cu": "× N CU",
+     "status": "wip",
+     "desc": "side-by-side DD A-F rating of 3-5 tokens"
+    }
+   ]
+  },
+  {
+   "cat": "🧠 Wallet & Smart Money (7)",
+   "items": [
+    {
+     "id": "sm_tokens",
+     "title": "Skill #8 · Smart Money Hot Tokens",
+     "cu": "20 CU",
+     "status": "wip",
+     "desc": "/smart-money/v1/token/list — tokens with most SM buying today"
+    },
+    {
+     "id": "sm_wallets",
+     "title": "Skill #9 · Smart Money Profile",
+     "cu": "~90 CU",
+     "status": "live",
+     "desc": "Single-wallet behavior analysis: 7d/30d performance trend, trading style, TP/SL patterns, copy-trade ROI estimate, 🟢/🟡/🔴 verdict"
+    },
+    {
+     "id": "wallet_portfolio",
+     "title": "Skill #10 · Wallet Portfolio",
+     "cu": "10 CU",
+     "status": "wip",
+     "desc": "Any address → token holdings + unrealized PnL"
+    },
+    {
+     "id": "wallet_style",
+     "title": "Skill #11 · Wallet Style",
+     "cu": "60..90 CU",
+     "status": "live",
+     "desc": "Freq × P&L grid + speed subtitle + badges — classify a wallet's trading style."
+    },
+    {
+     "id": "wallet_money_flow",
+     "title": "Skill #12 · Wallet Net Flow",
+     "cu": "5 CU",
+     "status": "wip",
+     "desc": "Inflow/outflow USD aggregates for a wallet list"
+    },
+    {
+     "id": "wallet_score",
+     "title": "Skill #13 · Wallet Score",
+     "cu": "30..110 CU",
+     "status": "live",
+     "desc": "4-factor wallet scoring with alpha tier, formula breakdown, and dedicated UI"
+    },
+    {
+     "id": "sm_flow_token",
+     "title": "Skill #14 · Wallet Analysis",
+     "cu": "90..180 CU",
+     "status": "live",
+     "desc": "Single-wallet deep-dive: profile, assets (current + intervals), trading & PnL by interval, risk metrics (concentration, activeness, open positions)"
+    }
+   ]
+  },
+  {
+   "cat": "🔐 Security & Risk (5)",
+   "items": [
+    {
+     "id": "rug_score",
+     "title": "Skill #15 · Rugpull Risk Score",
+     "cu": "35 CU",
+     "status": "wip",
+     "desc": "Security + contract + holder heuristic aggregate"
+    },
+    {
+     "id": "lp_check",
+     "title": "Skill #16 · LP Lock Checker",
+     "cu": "5 CU",
+     "status": "wip",
+     "desc": "Confirm locked liquidity + unlock date"
+    },
+    {
+     "id": "kols",
+     "title": "Skill #17 · KOL / Dev Links",
+     "cu": "0 CU",
+     "status": "wip",
+     "desc": "Social/website + CA creator address history"
+    },
+    {
+     "id": "rugcheck_risk_audit",
+     "title": "Skill #17b · RugCheck Audit (Live)",
+     "cu": "142 CU",
+     "status": "live",
+     "source": "birdeye",
+     "desc": "Same UI format as rugcheck.xyz · 7 risk cards + Liq Min/Max/DD 24h (×1 call 20CU) + Holder list top20 (×1 call 30CU) + insider/dev/sniper/bundle cohorts (×1 call 21CU) — max 3×1-call, total ~142 CU. YES holders default."
+    },
+    {
+     "id": "junk_predict",
+     "title": "Skill #23 · Junk Token Prediction (ML)",
+     "cu": "300 CU",
+     "status": "live",
+     "source": "birdeye",
+     "desc": "Logistic-regression junk score (0-100) on 16 features. Score ≥ threshold → JUNK. Paste one/many addresses, or Quick Test random 30 from v3 list."
+    }
+   ]
+  },
+  {
+   "cat": "⛓ Chain & Platform (3)",
+   "items": [
+    {
+     "id": "chains",
+     "title": "Skill #18 · Cross-Chain Compare",
+     "cu": "× CU",
+     "status": "wip",
+     "desc": "Same trending list across sol/bsc/base/eth side-by-side"
+    },
+    {
+     "id": "pf_tokens",
+     "title": "Skill #19 · Platform (pump.fun, moonshot…)",
+     "cu": "50 CU",
+     "status": "wip",
+     "desc": "Filter discovery to a launch platform"
+    },
+    {
+     "id": "meme_index",
+     "title": "Skill #20 · Meme Index",
+     "cu": "30 CU",
+     "status": "wip",
+     "desc": "Track meme basket health + rotation heat"
+    }
+   ]
+  },
+  {
+   "cat": "📈 History & Charts (5)",
+   "items": [
+    {
+     "id": "kline_pattern",
+     "title": "Skill #21 · Kline Pattern",
+     "cu": "25..100 CU",
+     "status": "live",
+     "desc": "Classify candlestick pattern + 0..100 score. trend/slope/volatility/drawdown/vol_ratio/up_from_low → 11 patterns."
+    },
+    {
+     "id": "trending_score",
+     "title": "Skill #22 · Token Trending Score",
+     "cu": "~171 CU",
+     "status": "live",
+     "source": "birdeye",
+     "desc": "0..100 momentum score per interval (5m/15m/30m/1h/4h) from Volume 25% + Price 25% + Liquidity 15% + Holder 20% + Security 15%. Security <40 → hard cap 0.1× (scam-proof). All raw data cached to CSV for backtest/ML tuning."
+    },
+    {
+     "id": "price_1y",
+     "title": "Skill #23 · 1Y Price + Benchmarks",
+     "cu": "15 CU",
+     "status": "wip",
+     "desc": "ATH/ATL + drawdowns vs SOL/ETH/BTC"
+    },
+    {
+     "id": "vol_profile",
+     "title": "Skill #23 · Volume Profile",
+     "cu": "10 CU",
+     "status": "wip",
+     "desc": "Historic buy/sell volume distribution"
+    },
+    {
+     "id": "corr_map",
+     "title": "Skill #24 · Token Correlation Map",
+     "cu": "N×15",
+     "status": "wip",
+     "desc": "Which tokens move together?"
+    },
+    {
+     "id": "events",
+     "title": "Skill #25 · Catalyst Events",
+     "cu": "0 CU",
+     "status": "wip",
+     "desc": "Upcoming unlock / listing / vesti timeline"
+    }
+   ]
+  },
+  {
+   "cat": "🤖 Alerts & Bots (2)",
+   "items": [
+    {
+     "id": "alert_surge",
+     "title": "Skill #26 · Volume Surge Alert Rule",
+     "cu": "30 CU/hr",
+     "status": "wip",
+     "desc": "Generate Telegram webhook payload for poller"
+    },
+    {
+     "id": "tg_signal",
+     "title": "Skill #27 · Telegram Signal Pack",
+     "cu": "0 CU",
+     "status": "wip",
+     "desc": "Render outputs ready to ```paste``` into Telegram bot"
+    }
+   ]
+  },
+  {
+   "cat": "⚙ Utils & Settings (2)",
+   "items": [
+    {
+     "id": "key",
+     "title": "Skill #28 · API Key",
+     "cu": "0 CU",
+     "status": "live",
+     "desc": "Paste key → session / persist to ~/.birdeye.env"
+    },
+    {
+     "id": "billing",
+     "title": "Skill #29 · CU Usage Monitor",
+     "cu": "0 CU",
+     "status": "wip",
+     "desc": "Track CU/day per skill + budget alerts"
+    },
+    {
+     "id": "about",
+     "title": "Skill #30 · About / Docs Links",
+     "cu": "0 CU",
+     "status": "live",
+     "desc": "OpenAPI llms.txt + skill source paths"
+    }
+   ]
+  }
+ ]
+}

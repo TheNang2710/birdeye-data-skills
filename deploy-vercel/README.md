@@ -1,8 +1,9 @@
-# Birdeye Skills — Vercel Test Console
+# Birdeye Skills — Vercel App & Shared Console
 
-A standalone, test-only deployment of the Birdeye skills console (the `/test`
-page). Nothing else from the hub ships here: no home page, no detail view, no
-server-side history store.
+A single deployment that ships the **shared web app**: the landing page
+(`/`), the test console (`/test`) and the per-skill drill view
+(`/detail`). The exact same `public/` folder is also served locally by
+`../birdeye_ui.py` (port `8765`) — one UI, one source of truth.
 
 ```
 deploy-vercel/
@@ -16,12 +17,20 @@ deploy-vercel/
 │       ├── junk_ml.py
 │       ├── trending_score.py
 │       └── lr_params.json
-├── public/index.html     the test console (served at /)
+├── public/               the shared web app (served by Vercel & local 8765)
+│   ├── index.html        landing page — skill cards + setup guide  (/)
+│   ├── test.html         test console — run skills                 (/test)
+│   ├── detail.html       per-skill drill view                      (/detail)
+│   ├── hub.js / hub.css  shared front-end bundle
+│   ├── catalog.json      static skill catalog (Vercel fallback for /api/catalog)
+│   └── assets/           logos (favicon, dark/light wordmark, svg)
 ├── dev.py                local dev server, mirrors the Vercel routing
 ├── sync-cli.sh           re-copy the shared CLI bundle from the workspace
-├── vercel.json           function config (maxDuration, includeFiles)
+├── vercel.json           function config (maxDuration, includeFiles, cleanUrls)
 └── requirements.txt
 ```
+
+> `cleanUrls: true` in `vercel.json` makes `/test` serve `test.html` on Vercel.
 
 ## Secure ML runtime (`api/_ml/`)
 
@@ -54,9 +63,19 @@ private deployment, set `BIRDEYE_ALLOW_ENV_KEY=1`.
 
 ## Local development
 
+The shared web app is normally previewed through the root hub server (which
+serves this same `public/` folder):
+
+```bash
+cd ..
+./server.sh watch            # -> http://127.0.0.1:8765/  (landing)  &  /test
+```
+
+To test this folder in isolation (mirrors the Vercel routing + `cleanUrls`):
+
 ```bash
 cd deploy-vercel
-python3 dev.py --port 8787        # -> http://127.0.0.1:8787
+python3 dev.py --port 8787        # -> http://127.0.0.1:8787/test
 ```
 
 No dependencies beyond the stdlib plus `requests` (already needed by the CLI).
@@ -94,7 +113,7 @@ Prerequisite: the workspace is pushed to `TheNang2710/birdeye-data-skills`
 2. **Import Git Repository** → pick `birdeye-data-skills`. If it is not listed,
    click *Adjust GitHub App Permissions* and grant access to the repo.
 3. In **Configure Project** set:
-   - **Project Name**: `skills` (or any name)
+   - **Project Name**: `birdeye-data-skills` (or any name)
    - **Framework Preset**: **Other**
    - **Root Directory**: click **Edit** → choose **`deploy-vercel`**
      ← *required*: the repo is a monorepo, so `deploy-vercel/` is where

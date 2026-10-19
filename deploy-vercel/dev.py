@@ -23,6 +23,32 @@ HERE = pathlib.Path(__file__).resolve().parent
 API = HERE / "api"
 PUBLIC = HERE / "public"
 
+_MIME = {
+    ".html": "text/html; charset=utf-8",
+    ".js": "text/javascript; charset=utf-8",
+    ".css": "text/css; charset=utf-8",
+    ".json": "application/json; charset=utf-8",
+    ".png": "image/png",
+    ".svg": "image/svg+xml",
+    ".ico": "image/x-icon",
+}
+
+
+def resolve_public(url_path: str) -> pathlib.Path | None:
+    """Map a URL path to a file in public/ (mirrors Vercel `cleanUrls: true`)."""
+    rel = url_path.lstrip("/") or "index.html"
+    cand = PUBLIC / rel
+    if cand.is_dir():
+        cand = cand / "index.html"
+    elif not cand.exists() and not cand.suffix:
+        cand = cand.with_suffix(".html")  # /test -> /test.html
+    try:
+        cand = cand.resolve(strict=True)
+        cand.relative_to(PUBLIC.resolve())
+    except Exception:
+        return None
+    return cand
+
 
 def load_dotenv() -> None:
     """Populate os.environ from .env files (existing vars always win)."""
@@ -98,8 +124,9 @@ class Router(http.server.BaseHTTPRequestHandler):
             return META.handler.do_GET(self)
         if p.startswith("/api/run"):
             return RUN.handler.do_GET(self)
-        if p in ("/", "/index.html"):
-            return self._static(PUBLIC / "index.html", "text/html; charset=utf-8")
+        fp = resolve_public(p)
+        if fp is not None:
+            return self._static(fp, _MIME.get(fp.suffix, "application/octet-stream"))
         self.send_error(404, "not found")
 
     def do_POST(self):  # noqa: N802

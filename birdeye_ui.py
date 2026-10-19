@@ -67,6 +67,8 @@ import time
 import urllib.parse
 
 HERE = pathlib.Path(__file__).resolve().parent
+# Shared web app: same folder serves the local hub (8765) and the Vercel deploy.
+PUBLIC = HERE / "deploy-vercel" / "public"
 SKILL_SCREENER = HERE / "birdeye-screener"
 CLI_PATH = SKILL_SCREENER / "scripts" / "birdeye_cli.py"
 SCREENER_PATH = SKILL_SCREENER / "scripts" / "birdeye_screener.py"
@@ -622,7 +624,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         qs = urllib.parse.parse_qs(parsed.query)
         if parsed.path in ("/", "/index.html", "/home.html"):
-            html_p = HERE / "assets" / "home.html"
+            html_p = PUBLIC / "index.html"
             try:
                 data = html_p.read_bytes()
                 # Inject CATALOG_JSON_RAW so hub.js uses the fresh server catalog
@@ -635,15 +637,15 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._send_html(200, data)
             return
         if parsed.path in ("/test", "/test.html"):
-            html_p = HERE / "assets" / "test.html"
+            html_p = PUBLIC / "test.html"
             try:
                 data = html_p.read_bytes()
             except Exception as e:
                 data = f"<html><body><pre>read test.html fail: {e}</pre></body></html>".encode("utf-8")
             self._send_html(200, data)
             return
-        if parsed.path == "/detail.html":
-            html_p = HERE / "assets" / "detail.html"
+        if parsed.path in ("/detail", "/detail.html"):
+            html_p = PUBLIC / "detail.html"
             try:
                 data = html_p.read_bytes()
             except Exception as e:
@@ -659,7 +661,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return
         # R9: Serve modular static assets (CSS/JS extracted to separate files for easy edit)
         if parsed.path in ("/hub.css", "/assets/hub.css"):
-            css_p = HERE / "assets" / "hub.css"
+            css_p = PUBLIC / "hub.css"
             try:
                 data = css_p.read_bytes() if css_p.exists() else b"/* hub.css missing, run extract step */"
             except Exception as e:
@@ -672,7 +674,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.wfile.write(data)
             return
         if parsed.path in ("/hub.js", "/assets/hub.js"):
-            js_p = HERE / "assets" / "hub.js"
+            js_p = PUBLIC / "hub.js"
             try:
                 data = js_p.read_bytes() if js_p.exists() else b"/* hub.js missing, run extract step */"
             except Exception as e:
@@ -950,7 +952,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 ],
             })
             return
-        # Static file: /API/*.md (modular design docs) and /assets/* (logos)
+        # Static file: shared web app (/assets/*) + design docs (/API/*, /docs/*)
         _p = parsed.path
         _MIME_MAP = {
             ".md": "text/markdown; charset=utf-8",
@@ -962,18 +964,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
             ".js": "application/javascript; charset=utf-8",
             ".json": "application/json; charset=utf-8",
         }
-        if _p.startswith("/API/") or _p.startswith("/docs/") or _p.startswith("/assets/") or _p.startswith("/birdeye-screener/assets/"):
-            # Sanitize: no .. traversal
-            _safe = _p.lstrip("/").replace("..", "_")
-            _fp = HERE / _safe
+        if _p == "/catalog.json":
+            _fp = PUBLIC / "catalog.json"
+        elif _p.startswith("/assets/"):
+            _fp = PUBLIC / _p.lstrip("/").replace("..", "_")
+        elif _p.startswith("/API/") or _p.startswith("/docs/") or _p.startswith("/birdeye-screener/assets/"):
+            _fp = HERE / _p.lstrip("/").replace("..", "_")
+        else:
+            _fp = None
+        if _fp is not None:
             try:
                 _fp_resolved = _fp.resolve(strict=True)
             except Exception:
                 self._send_json(404, {"error": "static not found"})
                 return
-            # Security: must be under HERE root
+            # Security: must stay inside the served roots
             try:
-                _fp_resolved.relative_to(HERE)
+                _fp_resolved.relative_to(PUBLIC if _p.startswith("/assets/") or _p == "/catalog.json" else HERE)
             except Exception:
                 self._send_json(403, {"error": "forbidden"})
                 return
@@ -991,7 +998,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self.send_header("Content-Type", _mime)
             self.send_header("Content-Length", str(len(_data)))
             # No cache for markdown docs (frequently edited); short cache for images
-            if _ext == ".md":
+            if _ext == ".md" or _p == "/catalog.json":
                 self.send_header("Cache-Control", "no-store, no-cache, must-revalidate")
             else:
                 self.send_header("Cache-Control", "public, max-age=3600")
