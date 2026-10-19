@@ -1,0 +1,563 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Birdeye Skills — Test UI</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#141821; --panel2:#1a1f2b; --line:#262c3a;
+    --text:#e6e9f2; --mute:#8b95ad; --accent:#5b9dff; --accent2:#7c5bff;
+    --good:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 ui-sans-serif,-apple-system,"Segoe UI",Inter,system-ui,sans-serif}
+  header{padding:9px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;background:linear-gradient(180deg,#0f1320,#0b0d12)}
+  header h1{font-size:13px;margin:0;font-weight:700;letter-spacing:.2px}
+  header .pill{font-size:11px;color:var(--mute)}
+  header .status{margin-left:auto;font-size:11px;color:var(--accent)}
+  .layout{display:grid;grid-template-columns:260px 1fr 240px;min-height:calc(100vh - 39px)}
+  @media (max-width:1100px){.layout{grid-template-columns:1fr}}
+  /* ── Skill list ── */
+  nav{padding:10px;border-right:1px solid var(--line);overflow:auto;max-height:calc(100vh - 39px);background:#0d1017}
+  .sc{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:8px 10px;margin-bottom:6px;cursor:pointer;transition:.15s;display:flex;gap:8px;align-items:flex-start}
+  .sc:hover{border-color:var(--accent);background:var(--panel2)}
+  .sc.active{border-color:var(--accent);background:linear-gradient(180deg,#16203a,#141821);box-shadow:0 0 0 1px rgba(91,157,255,.4)}
+  .sc .ic{font-size:16px;line-height:1.3;flex-shrink:0}
+  .sc .body{flex:1;min-width:0}
+  .sc .nm{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sc .ds{font-size:10.5px;color:var(--mute);margin-top:1px;line-height:1.35}
+  .sc .cu{font-size:9.5px;color:var(--warn);margin-top:3px;font-weight:600;letter-spacing:.3px}
+  /* ── Output area ── */
+  section.out{padding:12px 16px 18px;overflow:auto}
+  .form{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:10px}
+  .form .hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .form .hd .ttl{font-weight:600;font-size:12.5px}
+  .form .hd .cmdbadge{font-family:ui-monospace,monospace;font-size:10px;color:var(--mute);background:#0d1017;padding:2px 6px;border-radius:999px;border:1px solid var(--line)}
+  .row{display:grid;grid-template-columns:70px 1fr;gap:8px;align-items:center;margin-bottom:6px}
+  .row label{color:var(--mute);font-size:11.5px}
+  input,select,button{font:inherit;color:inherit}
+  input[type=text],select{width:100%;background:#0d1017;border:1px solid var(--line);border-radius:6px;padding:6px 8px;outline:none;font-size:12.5px}
+  input[type=text]:focus,select:focus{border-color:var(--accent)}
+  .rowrun{display:flex;gap:8px;align-items:center;margin-top:6px}
+  .run{background:linear-gradient(180deg,#3b7be8,#2c60c4);border:none;border-radius:8px;padding:6px 12px;font-weight:600;cursor:pointer;font-size:12px;white-space:nowrap;box-shadow:0 1px 0 rgba(255,255,255,.1) inset}
+  .run:disabled{opacity:.55;cursor:not-allowed}
+  .runhint{font-size:10.5px;color:var(--mute)}
+  .meta{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;font-size:11px;color:var(--mute)}
+  .meta .chip{background:var(--panel);border:1px solid var(--line);padding:2px 8px;border-radius:999px}
+  .cu-chip{color:var(--warn);font-weight:600}
+  pre.out_body{background:#080a0f;border:1px solid var(--line);border-radius:9px;padding:11px;overflow:auto;margin:0;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;max-height:calc(100vh - 250px)}
+  .rendered-box{background:#080a0f;border:1px solid var(--line);border-radius:9px;padding:11px;overflow:auto;max-height:calc(100vh - 250px)}
+  /* ── History ── */
+  aside.history{padding:10px;border-left:1px solid var(--line);overflow:auto;max-height:calc(100vh - 39px);background:#0d1017}
+  aside h2{font-size:11px;margin:0 0 8px;color:var(--mute);text-transform:uppercase;letter-spacing:.6px;font-weight:700}
+  .h-item{background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:6px 8px;margin-bottom:5px;cursor:pointer;font-size:10.5px;transition:.12s}
+  .h-item:hover{border-color:var(--accent);background:var(--panel2)}
+  .h-item .hk{font-weight:600;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .h-item .hd{color:var(--mute);margin-top:2px;font-size:9.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .err{color:var(--bad)}
+  /* ── Format tabs ── */
+  .fmt-tabs{display:flex;gap:4px;margin-bottom:8px}
+  .fmt-tab{background:var(--panel);border:1px solid var(--line);border-radius:7px 7px 0 0;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer;color:var(--mute);border-bottom:none;transition:.12s}
+  .fmt-tab:hover{color:var(--text)}
+  .fmt-tab.active{background:#080a0f;color:var(--accent);border-color:var(--accent)}
+  .fmt-tab .cu-note{font-size:9.5px;color:var(--good);margin-left:4px;font-weight:500}
+  /* ── Compact param grid ── */
+  .fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:7px 10px;align-items:end}
+  .fld{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .fld>label{font-size:9.5px;color:var(--mute);letter-spacing:.35px;text-transform:uppercase;font-weight:700}
+  .fld.wide{grid-column:span 2}
+  .fld.full{grid-column:1/-1}
+  .fld input[type=text],.fld select{width:100%;background:#0d1017;border:1px solid var(--line);border-radius:7px;padding:5px 8px;font-size:12px;outline:none;transition:.12s;min-height:36px}
+  .fld input[type=text]:focus,.fld select:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,157,255,.14)}
+  .fld.mono input[type=text]{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;letter-spacing:.2px}
+  .chk-row{display:flex;flex-wrap:wrap;gap:6px}
+  .chk{display:inline-flex;align-items:center;gap:6px;background:#0d1017;border:1px solid var(--line);border-radius:999px;padding:5px 9px;font-size:11px;cursor:pointer;user-select:none;transition:.12s}
+  .chk:hover{border-color:var(--accent)}
+  .chk input{accent-color:var(--accent);margin:0}
+  .form-foot{display:flex;align-items:center;gap:10px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .form-foot .runhint{font-size:10.5px;color:var(--mute)}
+  .cu-badge{margin-left:auto;font-size:10px;color:var(--warn);font-weight:700;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);padding:2px 8px;border-radius:999px}
+  /* ── Address copy + external link ── */
+  .copy-addr:hover{color:var(--accent)!important}
+  .addr-ext{margin-left:3px;color:var(--accent);text-decoration:none;font-size:11px;opacity:.75;cursor:pointer}
+  .addr-ext:hover{opacity:1}
+  #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(16px);background:#1a1f2b;border:1px solid var(--accent);color:var(--text);padding:8px 16px;border-radius:999px;font-size:12px;opacity:0;pointer-events:none;transition:.2s;z-index:99;box-shadow:0 10px 30px rgba(0,0,0,.55)}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  /* ── Workflow overview — right drawer ── */
+  .form .hd{gap:6px}
+  .form .hd .ttl{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .flowBtn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:999px;padding:4px 8px;font-size:10.5px;font-weight:600;cursor:pointer;white-space:nowrap;transition:.12s}
+  .flowBtn:hover{border-color:var(--accent);color:var(--accent)}
+  .fd-scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .2s;z-index:110}
+  .fd-scrim.show{opacity:1;pointer-events:auto}
+  .flow-drawer{position:fixed;top:0;right:0;height:100vh;width:min(34vw,560px);min-width:320px;background:var(--panel);border-left:1px solid var(--line);box-shadow:-18px 0 44px rgba(0,0,0,.55);transform:translateX(100%);transition:transform .22s ease;z-index:120;display:flex;flex-direction:column}
+  .flow-drawer.open{transform:translateX(0)}
+  .fd-head{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0f1320,#0b0d12)}
+  .fd-head .t{font-weight:700;font-size:13px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fd-head button{background:none;border:none;color:var(--mute);font-size:16px;cursor:pointer;line-height:1}
+  .fd-head button:hover{color:var(--text)}
+  .fd-body{padding:14px;overflow:auto;font-size:12.5px;line-height:1.55}
+  .fd-sec{margin-bottom:18px}
+  .fd-sec h4{margin:0 0 8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--mute);font-weight:700}
+  .flowStep{display:flex;gap:9px;padding:6px 0;align-items:flex-start}
+  .flowStep .n{flex:0 0 22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .flowStep .txt{flex:1}
+  .promptBox{padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#0d1017;cursor:pointer;font-size:12px;line-height:1.55}
+  .promptBox:hover{border-color:var(--accent)}
+  .docLink{display:inline-flex;align-items:center;gap:6px;margin-top:4px;color:var(--accent);text-decoration:none;font-size:12px}
+  .docLink:hover{text-decoration:underline}
+  @media (max-width:1280px){
+    .fld.wide{grid-column:1/-1}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧪 Birdeye Skills</h1>
+  <span class="pill">all LIVE · click history to replay (0 CU)</span>
+  <span class="status" id="status"></span>
+</header>
+<div class="layout">
+  <nav id="skillList"></nav>
+  <section class="out">
+    <div class="form" id="formArea"></div>
+    <div class="meta" id="metaArea"></div>
+    <div class="fmt-tabs" id="fmtTabs" style="display:none">
+      <button class="fmt-tab active" data-fmt="ui">🖥️ UI</button>
+      <button class="fmt-tab" data-fmt="json">{ } JSON<span class="cu-note">0 CU</span></button>
+      <button class="fmt-tab" data-fmt="telegram">✈️ Telegram<span class="cu-note">0 CU</span></button>
+    </div>
+    <div id="outputArea"></div>
+  </section>
+  <aside class="history">
+    <h2>History</h2>
+    <div id="historyList"></div>
+  </aside>
+</div>
+<script>
+const CHAINS = ["sol","bsc","base","eth","arc","robinhood","ethw"];
+const SKILLS = [
+  {id:"tl", icon:"🔥", name:"Trending List", desc:"Top trending tokens across chains & timeframes", cmd:"trending-list", type:"list", cu:"30-50", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"interval",label:"Interval",type:"select",opts:["1h","4h","24h"],def:"1h"},
+    {k:"source",label:"Source",type:"select",opts:["v3-list","trending"],def:"v3-list"},
+    {k:"sort_by",label:"Sort by",type:"select",opts:["volumeUSD","market_cap","liquidity","trade_count","holder","rank"],def:"volumeUSD"},
+    {k:"platform",label:"Platform",type:"select",opts:["","pump.fun","moonshot","raydium","jupiter studio","meteora dbc"],def:""},
+    {k:"limit",label:"Limit",type:"text",def:"20"},
+  ]},
+  {id:"dd", icon:"🔍", name:"Token DD", desc:"Deep token due-diligence: liquidity, holders, risk", cmd:"token-dd", type:"token", cu:"~71", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"address",label:"Token",type:"text",def:""},
+    {k:"include",label:"Include (+CU)",type:"select",opts:["","list","advanced_security","risk_history","list,advanced_security"],def:""},
+  ]},
+  {id:"contract_dd", icon:"🛡️", name:"Contract DD", desc:"Smart contract security scan & composite score", cmd:"contract-dd", type:"token", cu:"~86", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"address",label:"Token",type:"text",def:""},
+    {k:"skip_kline",label:"Skip kline",type:"checkbox",def:false},
+  ]},
+  {id:"stc", icon:"🧹", name:"Spam Token Cleaner", desc:"Filter out scam/spam tokens from a list", cmd:"", script:"stc", type:"list", cu:"~70", inputs:[
+    {k:"chains",label:"Chains",type:"text",def:"solana"},
+    {k:"min_mc",label:"Min MC",type:"text",def:"1000000"},
+    {k:"max_vol",label:"Max Vol",type:"text",def:"50000"},
+  ]},
+  {id:"rugcheck", icon:"🧪", name:"RugCheck Audit", desc:"Full rugcheck security + risk history audit", cmd:"rugcheck-audit", type:"token", cu:"~142", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"address",label:"Token",type:"text",def:""},
+    {k:"rug_liq_window",label:"Liq window",type:"select",opts:["1h","4h","8h","24h"],def:"24h"},
+    {k:"rug_holders_top_n",label:"Holders top N",type:"text",def:"20"},
+  ]},
+  {id:"kline", icon:"🕯️", name:"Kline Pattern", desc:"Candlestick pattern recognition + score", cmd:"kline-pattern", type:"token", cu:"25-100", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"address",label:"Token",type:"text",def:""},
+    {k:"resolution",label:"Resolution",type:"select",opts:["1m","5m","15m","30m","1h","4h","1d"],def:"15m"},
+    {k:"window",label:"Window",type:"select",opts:["1d","3d","7d","14d","30d"],def:"7d"},
+  ]},
+  {id:"wallet_score", icon:"📊", name:"Wallet Score", desc:"0-100 alpha score + copy-tradeability score", cmd:"wallet-score", type:"wallet", cu:"30-110", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"wallet",label:"Wallet",type:"text",def:"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"},
+    {k:"duration",label:"Duration",type:"select",opts:["24h","7d","30d","90d","all"],def:"30d"},
+    {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
+    {k:"skip_rug",label:"Skip rug",type:"checkbox",def:false},
+    {k:"skip_portfolio",label:"Skip portfolio",type:"checkbox",def:false},
+    {k:"skip_first_tx",label:"Skip first-tx",type:"checkbox",def:false},
+    {k:"include_style",label:"Include style",type:"checkbox",def:false},
+  ]},
+  {id:"wallet_style", icon:"🎭", name:"Wallet Style", desc:"Classify trading style from PnL + trade patterns", cmd:"wallet-style", type:"wallet", cu:"~90", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"wallet",label:"Wallet",type:"text",def:"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"},
+    {k:"duration",label:"Duration",type:"select",opts:["7d","30d"],def:"30d"},
+    {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
+    {k:"skip_tx_list",label:"Skip tx-list",type:"checkbox",def:false},
+    {k:"skip_first_tx",label:"Skip first-tx",type:"checkbox",def:false},
+  ]},
+  {id:"wallet_analysis", icon:"📈", name:"Wallet Analysis", desc:"Full wallet deep-dive: PnL, assets, risk, style", cmd:"wallet-analysis", type:"wallet", cu:"~240", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"wallet",label:"Wallet",type:"text",def:"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"},
+    {k:"horizon",label:"Horizon",type:"select",opts:["short","normal","long"],def:"normal"},
+    {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
+    {k:"skip_tx_list",label:"Skip tx-list",type:"checkbox",def:false},
+    {k:"skip_first_tx",label:"Skip first-tx",type:"checkbox",def:false},
+    {k:"skip_portfolio",label:"Skip portfolio",type:"checkbox",def:false},
+  ]},
+  {id:"sm_profile", icon:"🎯", name:"Smart Money Profile", desc:"Single wallet: style, TP/SL, copy-trade verdict", cmd:"smart-money-profile", type:"wallet", cu:"~120", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"wallet",label:"Wallet",type:"text",def:"9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"},
+    {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
+    {k:"skip_tx_list",label:"Skip tx-list",type:"checkbox",def:false},
+    {k:"skip_first_tx",label:"Skip first-tx",type:"checkbox",def:false},
+  ]},
+  {id:"sm_leaderboard", icon:"🏆", name:"SM Leaderboard", desc:"Rank up to 10 wallets by composite score", cmd:"smart-money-leaderboard", type:"wallet", cu:"90/w", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"wallet",label:"Wallets (comma-sep)",type:"text",def:"A8yCtfXB2VfyVxzj8gy6F2vSxiPkPcz8yquiusbT9yfW,9WzDXwBbmkg8ZTbNMqUxvQRAyrZzDsGYdLVL9zYtAWWM"},
+    {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
+  ]},
+  {id:"smart_wallets", icon:"💰", name:"Smart Wallets", desc:"Top Smart Money Wallets ranked by NW/WR/PnL", cmd:"smart-wallets", type:"list", cu:"30-500", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"depth",label:"Depth",type:"select",opts:["fast","standard","deep"],def:"fast"},
+    {k:"min_trades",label:"Min trades",type:"text",def:"15"},
+    {k:"min_unique",label:"Min unique",type:"text",def:"8"},
+    {k:"pass_score",label:"Pass score",type:"text",def:"70"},
+    {k:"limit",label:"Limit",type:"text",def:"20"},
+  ]},
+];
+
+let currentSkill = SKILLS[0];
+let lastRunId = null;       // for format switching via cache (0 CU)
+let lastRenderedHtml = "";  // cached UI output
+let currentFmt = "ui";
+
+function setFmt(fmt){
+  currentFmt = fmt;
+  document.querySelectorAll(".fmt-tab").forEach(t=>t.classList.toggle("active", t.dataset.fmt===fmt));
+}
+
+document.querySelectorAll(".fmt-tab").forEach(t=>t.onclick=()=>switchFormat(t.dataset.fmt));
+
+async function switchFormat(fmt){
+  setFmt(fmt);
+  if(fmt==="ui"){
+    document.getElementById("outputArea").innerHTML = lastRenderedHtml
+      ? `<div class="rendered-box">${lastRenderedHtml}</div>`
+      : '<div class="rendered-box">No UI output yet — run a skill first.</div>';
+    decorateAddrs();
+    return;
+  }
+  if(!lastRunId){
+    document.getElementById("outputArea").innerHTML = '<div class="rendered-box">Run a skill first to see other formats.</div>';
+    return;
+  }
+  const serverFmt = fmt==="json" ? "raw-json" : "telegram";
+  document.getElementById("outputArea").innerHTML = '<div class="rendered-box">Loading cached output…</div>';
+  try{
+    const res = await fetch("/api/history/render?runId="+encodeURIComponent(lastRunId)+"&format="+serverFmt);
+    const j = await res.json();
+    let out = j.stdout || j.payload || "";
+    if(typeof out==="object" && out!==null){
+      out = JSON.stringify(out,null,2);
+    }
+    out = String(out).replace(/^#RUN_ID[^\n]*\n?/, "").trim();
+    if(fmt==="json" && (out.startsWith("{")||out.startsWith("["))){
+      try{ out = JSON.stringify(JSON.parse(out),null,2); }catch{}
+    }
+    document.getElementById("outputArea").innerHTML = `<pre class="out_body">${out}</pre>`;
+    decorateAddrs();
+  }catch(e){
+    document.getElementById("outputArea").innerHTML = `<pre class="out_body err">${String(e)}</pre>`;
+  }
+}
+
+// ── Address helpers: click-to-copy + external Birdeye link ──
+function chainSlug(ch){ const m={sol:"solana",eth:"ethereum"}; return m[(ch||"").toLowerCase()]||ch||"sol"; }
+function birdeyeUrl(kind, addr){
+  const ch = chainSlug((document.getElementById("inp_chain")||{}).value || "sol");
+  return kind==="wallet"
+    ? `https://birdeye.so/${ch}/wallet-analyzer/${addr}?tab=pnl`
+    : `https://birdeye.so/${ch}/token/${addr}?tab=holders&trades_layout=table`;
+}
+let _toastTimer;
+function toast(msg){
+  let t = document.getElementById("toast");
+  if(!t){ t=document.createElement("div"); t.id="toast"; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(_toastTimer); _toastTimer = setTimeout(()=>t.classList.remove("show"), 1500);
+}
+function copyText(t){
+  if(!t) return;
+  const done = ()=>toast("✓ Copied  "+t.slice(0,6)+"…"+t.slice(-4));
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(t).then(done, ()=>toast("Copy failed")); }
+  else { const a=document.createElement("textarea"); a.value=t; document.body.appendChild(a); a.select(); try{ document.execCommand("copy"); done(); }catch{ toast("Copy failed"); } a.remove(); }
+}
+// Append an ↗ link icon after every full-address chip (.copy-addr) in the output
+function decorateAddrs(){
+  const root = document.getElementById("outputArea");
+  root.querySelectorAll(".copy-addr").forEach(el=>{
+    if(el.dataset.decorated) return; el.dataset.decorated = "1";
+    const full = el.dataset.copyAddr || el.textContent.trim();
+    const kind = (el.title||"").toLowerCase().includes("wallet") ? "wallet"
+               : (currentSkill.type==="wallet" ? "wallet" : "token");
+    const a = document.createElement("a");
+    a.className = "addr-ext"; a.href = birdeyeUrl(kind, full);
+    a.target = "_blank"; a.rel = "noopener"; a.textContent = "↗";
+    a.title = kind==="wallet" ? "Mở trên Birdeye Wallet Analyzer" : "Mở trên Birdeye Token page";
+    el.insertAdjacentElement("afterend", a);
+  });
+}
+// Click any address chip → copy full address
+document.getElementById("outputArea").addEventListener("click", e=>{
+  const el = e.target.closest(".copy-addr");
+  if(el){ e.preventDefault(); copyText(el.dataset.copyAddr || el.textContent.trim()); }
+});
+
+// ── Workflow overview (right drawer): flow steps + prompt + full doc link ──
+const FLOW_BY_ID = {
+  tl:{doc:"trending-list-workflow.md",
+     steps:["Chọn chain + interval (1h/4h/24h)","Chọn source (v3-list / trending) + sort by volume","Gọi Birdeye lấy danh sách trending (30-50 CU)","Quét list → mở Token DD cho ứng viên đáng chú ý"],
+     prompt:"Cho tôi top token trending trên Solana trong 1h qua theo volume, và cảnh báo token nào có thanh khoản đáng ngờ."},
+  dd:{doc:"token-dd-workflow.md",
+     steps:["Dán địa chỉ token","Chạy DD 10 bước: overview + security + smart-money + activity","Đọc điểm A-F và verdict BUY/SELL","Drill sâu holders / risk tabs"],
+     prompt:"Chạy due-diligence đầy đủ cho token này và cho tôi biết có an toàn để mua không."},
+  contract_dd:{doc:"contract-dd-workflow.md",
+     steps:["Dán địa chỉ contract","Tính sub-score: Safety 45% · Holders 30% · Price 25%","Composite score → tier (Safe/Caution/Risky/Danger)","Xem bảng formula breakdown"],
+     prompt:"Quét contract này tìm mint/freeze authority, LP lock và mức tập trung holder."},
+  stc:{doc:"skill-06-spam-token-cleaner.md",
+     steps:["Đặt chains + min MC + max volume","Lọc bỏ token scam/spam","Trả về list đã làm sạch"],
+     prompt:"Lọc bỏ token spam khỏi list này — chỉ giữ mcap > $1M với volume thực."},
+  rugcheck:{doc:"skill-17b-rugcheck-audit.md",
+     steps:["Dán địa chỉ token","Lấy security + risk history + holder distribution","Dựng 7 thẻ risk","Xem tab Overview/Markets/Insiders/Holders/Lockers"],
+     prompt:"Chạy rugcheck audit đầy đủ và liệt kê mọi rủi ro kèm mức độ nghiêm trọng."},
+  kline:{doc:"skill-21-kline-pattern.md",
+     steps:["Dán token + chọn resolution/window","Lấy nến OHLCV","Nhận diện pattern nến","Chấm điểm price action"],
+     prompt:"Phân tích nến 15m của token này và nhận diện pattern hiện tại."},
+  wallet_score:{doc:"wallet-score-workflow.md",
+     steps:["Dán địa chỉ wallet","Lấy PnL + trades + holdings","Tính điểm alpha 0-100 + điểm copy-trade","So sánh với baseline smart-money"],
+     prompt:"Chấm điểm alpha của wallet này và cho tôi biết có nên copy-trade không."},
+  wallet_style:{doc:"wallet-style-workflow.md",
+     steps:["Dán wallet + chọn duration","Phân tích PnL + pattern giao dịch","Phân loại trading style"],
+     prompt:"Wallet này giao dịch theo style nào — scalper, swing hay holder?"},
+  wallet_analysis:{doc:"workflow-wallet-analysis.md",
+     steps:["Dán wallet","PnL theo nhiều interval","Tài sản + rủi ro + style","Báo cáo deep-dive đầy đủ"],
+     prompt:"Cho tôi deep-dive đầy đủ wallet này: PnL, holdings, rủi ro và style."},
+  sm_profile:{doc:"workflow-smart-money-profile.md",
+     steps:["Dán wallet","Xu hướng hiệu suất + pattern TP/SL","Ước lượng ROI copy-trade","Verdict 🟢/🟡/🔴"],
+     prompt:"Profile smart-money wallet này: style, TP/SL và verdict copy-trade."},
+  sm_leaderboard:{doc:"workflow-smart-money-profile.md",
+     steps:["Dán tối đa 10 wallet","Chấm điểm từng wallet","Xếp hạng theo composite score"],
+     prompt:"Xếp hạng các wallet này theo smart-money score và chọn wallet tốt nhất để follow."},
+  smart_wallets:{doc:"README.md",
+     steps:["Chọn depth + ngưỡng lọc","Xếp hạng top smart-money wallet","Lọc theo NW/WR/PnL"],
+     prompt:"Liệt kê top smart-money wallet hiện tại xếp theo net worth và win rate."}
+};
+function flowFor(id){
+  return FLOW_BY_ID[id] || {
+    steps:["Mở skill","Điền tham số","▶ Run","Đọc kết quả"],
+    prompt:"Giải thích skill này làm gì và cách dùng nó.",
+    doc:null
+  };
+}
+function escapeHtml(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function openFlow(){
+  const s = currentSkill, f = flowFor(s.id);
+  document.getElementById("fdTitle").textContent = `${s.icon} ${s.name} · Workflow`;
+  const steps = f.steps.map((t,i)=>`<div class="flowStep"><div class="n">${i+1}</div><div class="txt">${escapeHtml(t)}</div></div>`).join("");
+  const doc = f.doc ? `<a class="docLink" href="/docs/${encodeURIComponent(f.doc)}" target="_blank" rel="noopener">📄 ${escapeHtml(f.doc)}</a>` : "";
+  document.getElementById("fdBody").innerHTML =
+      `<div class="fd-sec"><h4>Flow</h4>${steps}</div>`
+    + `<div class="fd-sec"><h4>Prompt · click to copy</h4><div class="promptBox" id="fdPrompt">${escapeHtml(f.prompt)}</div></div>`
+    + (doc ? `<div class="fd-sec"><h4>Full workflow doc</h4>${doc}</div>` : "");
+  const p = document.getElementById("fdPrompt"); if(p) p.onclick = ()=>copyText(f.prompt);
+  document.getElementById("flowDrawer").classList.add("open");
+  document.getElementById("fdScrim").classList.add("show");
+  document.getElementById("flowDrawer").setAttribute("aria-hidden","false");
+}
+function closeFlow(){
+  const d = document.getElementById("flowDrawer"); if(!d) return;
+  d.classList.remove("open"); d.setAttribute("aria-hidden","true");
+  document.getElementById("fdScrim").classList.remove("show");
+}
+(function buildFlowDrawer(){
+  const scrim = document.createElement("div"); scrim.id="fdScrim"; scrim.className="fd-scrim";
+  const dr = document.createElement("aside"); dr.id="flowDrawer"; dr.className="flow-drawer"; dr.setAttribute("aria-hidden","true");
+  dr.innerHTML = `<div class="fd-head"><span class="t" id="fdTitle">🧭 Workflow</span><button id="fdClose" title="Đóng (Esc)">✕</button></div><div class="fd-body" id="fdBody"></div>`;
+  document.body.appendChild(scrim); document.body.appendChild(dr);
+  scrim.onclick = closeFlow;
+  dr.querySelector("#fdClose").onclick = closeFlow;
+  document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeFlow(); });
+})();
+
+function renderSkillList(){
+  const el = document.getElementById("skillList");
+  el.innerHTML = SKILLS.map(s=>`<div class="sc ${s.id===currentSkill.id?'active':''}" data-id="${s.id}"><div class="ic">${s.icon}</div><div class="body"><div class="nm">${s.name}</div><div class="ds">${s.desc}</div><div class="cu">${s.cu} CU</div></div></div>`).join("");
+  el.querySelectorAll(".sc").forEach(c=>c.onclick=()=>{currentSkill=SKILLS.find(x=>x.id===c.dataset.id);renderSkillList();renderForm();});
+}
+
+function renderForm(){
+  const el = document.getElementById("formArea");
+  const s = currentSkill;
+  const WIDE = ["address","wallet"];               // full-width + monospace
+  const head = `<div class="hd"><span class="ttl">${s.icon} ${s.name}</span><span class="cmdbadge">${s.cmd||'stc'}</span><button class="flowBtn" id="flowBtn" title="Workflow overview — click để xem flow + prompt">🧭 Flow</button></div>`;
+  const fields = s.inputs.filter(i=>i.type!=="checkbox");
+  const checks = s.inputs.filter(i=>i.type==="checkbox");
+  let grid = fields.map(i=>{
+    const wide = WIDE.includes(i.k);
+    let ctrl;
+    if(i.type==="select"){
+      ctrl = `<select id="inp_${i.k}">${i.opts.map(o=>`<option value="${o}" ${o===i.def?'selected':''}>${o||'(all)'}</option>`).join("")}</select>`;
+    } else {
+      ctrl = `<input type="text" id="inp_${i.k}" value="${i.def||''}" placeholder="${i.placeholder||i.label}" spellcheck="false" autocomplete="off">`;
+    }
+    return `<div class="fld ${wide?'wide mono':''}"><label>${i.label}</label>${ctrl}</div>`;
+  }).join("");
+  if(checks.length){
+    grid += `<div class="fld wide"><label>Options</label><div class="chk-row">${
+      checks.map(i=>`<label class="chk"><input type="checkbox" id="inp_${i.k}" ${i.def?'checked':''}/> ${i.label}</label>`).join("")
+    }</div></div>`;
+  }
+  el.innerHTML = head + `<div class="fgrid">${grid}</div>`
+    + `<div class="form-foot"><button class="run" id="runBtn">▶ Run</button>`
+    + `<span class="runhint">Enter để chạy</span><span class="cu-badge">${s.cu} CU</span></div>`;
+  document.getElementById("runBtn").onclick = runSkill;
+  document.getElementById("flowBtn").onclick = openFlow;
+  el.querySelectorAll('input[type=text]').forEach(inp=>
+    inp.addEventListener('keydown',e=>{ if(e.key==="Enter"){ e.preventDefault(); runSkill(); } }));
+}
+
+function buildArgv(){
+  const s = currentSkill;
+  const argv = [s.cmd];
+  s.inputs.forEach(i=>{
+    const el = document.getElementById("inp_"+i.k);
+    if(!el) return;
+    if(i.type==="checkbox"){
+      if(el.checked) argv.push("--"+i.k.replace(/_/g,"-"));
+      return;
+    }
+    let v = el.value.trim();
+    if(!v) return;
+    // leaderboard: comma-sep wallets → repeated --wallet
+    if(s.id==="sm_leaderboard" && i.k==="wallet"){
+      v.split(",").map(x=>x.trim()).filter(Boolean).forEach(p=>argv.push("--wallet", p));
+      return;
+    }
+    const flag = "--"+i.k.replace(/_/g,"-");
+    argv.push(flag, v);
+  });
+  argv.push("--format","rendered");
+  return argv;
+}
+
+async function runSkill(){
+  const s = currentSkill;
+  const btn = document.getElementById("runBtn");
+  btn.disabled = true;
+  document.getElementById("status").textContent = "running…";
+  document.getElementById("metaArea").innerHTML = "";
+  document.getElementById("outputArea").innerHTML = '<div class="rendered-box">Loading…</div>';
+  const argv = buildArgv();
+  try{
+    const res = await fetch("/api/run",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({script:s.script||"birdeye_cli",argv})});
+    const j = await res.json();
+    showResult(j);
+  }catch(e){
+    document.getElementById("outputArea").innerHTML = `<pre class="out_body err">${String(e)}</pre>`;
+  }finally{
+    btn.disabled = false;
+    document.getElementById("status").textContent = "";
+    loadHistory();
+  }
+}
+
+function showResult(j){
+  let stdout = j.stdout||"";
+  const stderr = j.stderr||"";
+  stdout = stdout.replace(/^#RUN_ID[^\n]*\n?/, "");
+  const meta = [];
+  meta.push(`<span class="chip">exit ${j.exit}</span>`);
+  if(j.duration_ms) meta.push(`<span class="chip">${(j.duration_ms/1000).toFixed(1)}s</span>`);
+  const runMatch = (stderr+"\n"+j.stdout).match(/#RUN_ID\s+(\S+)/);
+  if(runMatch){ lastRunId = runMatch[1]; meta.push(`<span class="chip">${runMatch[1]}</span>`); }
+  else { lastRunId = null; }
+  const cuMatch = (stderr+"\n"+j.stdout).match(/cu=(\d+)/);
+  if(cuMatch) meta.push(`<span class="chip cu-chip">${cuMatch[1]} CU</span>`);
+  document.getElementById("metaArea").innerHTML = meta.join("");
+  document.getElementById("fmtTabs").style.display = "flex";
+  setFmt("ui");
+  const trimmed = stdout.trim();
+  if(trimmed.startsWith("<")){
+    lastRenderedHtml = trimmed;
+    document.getElementById("outputArea").innerHTML = `<div class="rendered-box">${trimmed}</div>`;
+  } else if(trimmed.startsWith("{")||trimmed.startsWith("[")){
+    try{
+      const obj = JSON.parse(trimmed);
+      // If the envelope has an `html` field (rendered format), use it as UI
+      if(obj && typeof obj==="object" && obj.html){
+        lastRenderedHtml = obj.html;
+        document.getElementById("outputArea").innerHTML = `<div class="rendered-box">${obj.html}</div>`;
+      } else {
+        lastRenderedHtml = `<pre class="out_body">${JSON.stringify(obj,null,2)}</pre>`;
+        document.getElementById("outputArea").innerHTML = lastRenderedHtml;
+      }
+    }catch{
+      lastRenderedHtml = `<pre class="out_body">${trimmed}</pre>`;
+      document.getElementById("outputArea").innerHTML = lastRenderedHtml;
+    }
+  } else {
+    lastRenderedHtml = `<pre class="out_body">${trimmed}</pre>`;
+    document.getElementById("outputArea").innerHTML = lastRenderedHtml;
+  }
+  decorateAddrs();
+  if(stderr) console.log("stderr:", stderr);
+}
+
+async function loadHistory(){
+  try{
+    const res = await fetch("/api/history/list?limit=30");
+    const j = await res.json();
+    const el = document.getElementById("historyList");
+    if(!j.items||!j.items.length){el.innerHTML='<div style="color:var(--mute);font-size:11px">no history</div>';return;}
+    el.innerHTML = j.items.map(it=>`<div class="h-item" data-ri="${it.runId||it.run_id}"><div class="hk">${it.summary||it.kind||'?'}</div><div class="hd">${it.detail||''} · ${it.runId||it.run_id||''}</div></div>`).join("");
+    el.querySelectorAll(".h-item").forEach(c=>c.onclick=()=>replayHistory(c.dataset.ri));
+  }catch(e){
+    document.getElementById("historyList").innerHTML = `<div class="err">${String(e)}</div>`;
+  }
+}
+
+async function replayHistory(runId){
+  if(!runId) return;
+  lastRunId = runId;
+  document.getElementById("status").textContent = "replaying (0 CU)…";
+  document.getElementById("outputArea").innerHTML = '<div class="rendered-box">Loading cached…</div>';
+  try{
+    const res = await fetch("/api/history/render?runId="+encodeURIComponent(runId)+"&format=render");
+    const j = await res.json();
+    const payload = j.payload;
+    const meta = [];
+    meta.push('<span class="chip">cached · 0 CU</span>');
+    if(payload && payload.runId) meta.push(`<span class="chip">${payload.runId}</span>`);
+    document.getElementById("metaArea").innerHTML = meta.join("");
+    document.getElementById("fmtTabs").style.display = "flex";
+    setFmt("ui");
+    if(payload && (payload.html||payload.rendered)){
+      lastRenderedHtml = payload.html||payload.rendered;
+      document.getElementById("outputArea").innerHTML = `<div class="rendered-box">${lastRenderedHtml}</div>`;
+    } else if(payload){
+      lastRenderedHtml = `<pre class="out_body">${JSON.stringify(payload,null,2)}</pre>`;
+      document.getElementById("outputArea").innerHTML = lastRenderedHtml;
+    } else {
+      lastRenderedHtml = `<pre class="out_body">${JSON.stringify(j,null,2)}</pre>`;
+      document.getElementById("outputArea").innerHTML = lastRenderedHtml;
+    }
+    decorateAddrs();
+  }catch(e){
+    document.getElementById("outputArea").innerHTML = `<pre class="out_body err">${String(e)}</pre>`;
+  }finally{
+    document.getElementById("status").textContent = "";
+  }
+}
+
+renderSkillList();
+renderForm();
+loadHistory();
+</script>
+</body>
+</html>

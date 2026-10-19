@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Birdeye Data Skill Detail</title>
+<script>
+(function(){
+  try {
+    var t = localStorage.getItem('be.theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+  } catch(e) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  }
+})();
+</script>
+<link rel="stylesheet" href="/hub.css">
+</head>
+<body data-page="detail">
+<header>
+  <h1>🛰 Birdeye Data Skills Hub</h1>
+  <span class="pill" id="cred">loading…</span>
+  <span class="pill" id="ver" title="click to reload UI code from disk (hot reload)" style="cursor:pointer">⏳</span>
+  <span id="breadcrumb" class="breadcrumb" style="display:none"></span>
+  <span style="flex:1"></span>
+  <button class="btn ghost" id="themeToggleBtn" title="Toggle theme (dark default)">☀️</button>
+  <button class="btn hubBtn" id="goHubBtn" title="Back to category cards">🏠 Hub</button>
+  <button class="btn ghost" id="hotReloadBtn" title="Reload UI from disk">🔁 Hot Reload</button>
+  <button class="btn ghost" id="docsBtn" title="Open llms.txt docs">📘 Docs</button>
+</header>
+
+<div id="homeView" style="display:none"></div>
+<main id="drillView">
+  <aside class="catalog" id="catalog"></aside>
+
+  <nav class="ctrl" id="ctrl">
+    <div class="group" id="g_key">
+      <h3>🔑 API Key</h3>
+      <div id="keyInfo"><span class="subtle">Loading key…</span></div>
+      <div id="keyActions" style="display:none" class="keybox">
+        <div class="subtle" style="font-size:12px;margin-bottom:4px">Paste key (32 chars typically):</div>
+        <div style="display:flex;gap:6px;align-items:stretch">
+          <input id="pasteKey" type="password" placeholder="dc9909a243924571b64f7c65fa2c032f…" style="flex:1;font-family:monospace;font-size:12px;padding:8px 10px;border-radius:8px;background:var(--input-bg);border:1px solid var(--line);color:var(--text);outline:none" />
+          <button type="button" class="btn ghost keyEyeBtn" id="pasteKey_eye" title="Show/hide key">👁</button>
+        </div>
+        <div class="copyrow" style="margin-top:6px">
+          <button class="btn primary" id="applySession">Apply · Session only (RAM)</button>
+          <button class="btn" id="savePersist">💾 Save to ~/.birdeye.env</button>
+          <button class="btn ghost" id="clearKey">Clear session</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="group" id="skillCtrl"></div>
+
+    <div class="group">
+      <div class="section-title">Quick tests</div>
+      <div class="copyrow">
+        <button class="btn" data-quick="hot">Trending SOL 1h</button>
+        <button class="btn" data-quick="pump">Pump.fun hot</button>
+        <button class="btn" data-quick="hee">DD · HeeHaw</button>
+        <button class="btn" data-quick="spcx">DD · SPCX (SM #1)</button>
+      </div>
+    </div>
+
+    <div class="group" id="nextActionsWrap" style="display:none">
+      <div class="section-title">⚡ Next Actions for selected token</div>
+      <div id="selToken" class="subtle"></div>
+      <div class="nextactions" id="nextActions"></div>
+    </div>
+  </nav>
+
+  <section class="outWrap">
+    <div id="installColTop" class="installColTop"></div>
+    <section class="out"><div id="out"></div></section>
+    <aside class="histCol" id="histCol">
+      <div class="group" style="padding:10px 12px">
+        <div class="row" style="align-items:center;margin-bottom:6px">
+          <label style="margin:0">📜 Recent runs</label>
+          <span style="margin-left:auto" class="subtle" id="histCount">0</span>
+        </div>
+        <div class="copyrow" style="margin-bottom:10px">
+          <button class="btn ghost" onclick="refreshHistory()">⟳ Refresh</button>
+          <button class="btn ghost" id="histClearOld" title="Clear runs older than 24h from disk">🗑 Clear old</button>
+        </div>
+        <div id="historyList" class="historyList"></div>
+      </div>
+    </aside>
+  </section>
+</main>
+
+<script defer src="/hub.js?v=4"></script>
+</body>
+</html>

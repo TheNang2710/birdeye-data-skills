@@ -1,0 +1,22 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "functions": {
+    "api/run.py": {
+      "maxDuration": 60,
+      "includeFiles": "api/**"
+    },
+    "api/meta.py": {
+      "maxDuration": 15,
+      "includeFiles": "api/**"
+    }
+  },
+  "headers": [
+    {
+      "source": "/api/(.*)",
+      "headers": [
+        { "key": "Cache-Control", "value": "no-store, max-age=0" }
+      ]
+    }
+  ]
+}

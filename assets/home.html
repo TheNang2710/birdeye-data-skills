@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Birdeye Data Skills Hub</title>
+<script>
+(function(){
+  try {
+    var t = localStorage.getItem('be.theme') || 'dark';
+    document.documentElement.setAttribute('data-theme', t);
+  } catch(e) {
+    document.documentElement.setAttribute('data-theme', 'dark');
+  }
+})();
+</script>
+<link rel="stylesheet" href="/hub.css">
+</head>
+<body data-page="home">
+<header>
+  <h1>🛰 Birdeye Data Skills Hub</h1>
+  <span class="pill" id="cred">loading…</span>
+  <span class="pill" id="ver" title="click to reload UI code from disk (hot reload)" style="cursor:pointer">⏳</span>
+  <span id="breadcrumb" class="breadcrumb" style="display:none"></span>
+  <span style="flex:1"></span>
+  <button class="btn ghost" id="themeToggleBtn" title="Toggle theme (dark default)">☀️</button>
+  <button class="btn hubBtn" id="goHubBtn" title="Back to category cards" style="display:none">🏠 Hub</button>
+  <button class="btn ghost" id="hotReloadBtn" title="Reload UI from disk">🔁 Hot Reload</button>
+  <button class="btn ghost" id="docsBtn" title="Open llms.txt docs">📘 Docs</button>
+</header>
+
+<div id="homeView"></div>
+<main id="drillView" style="display:none"></main>
+
+<script defer src="/hub.js?v=6"></script>
+</body>
+</html>

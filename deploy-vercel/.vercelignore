@@ -1,0 +1,14 @@
+# Keep the upload small and free of local/secret state.
+.git/
+.vercel/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+.local-cache/
+.env
+.env.*
+!.env.example
+README.md
+dev.py

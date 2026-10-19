@@ -1,0 +1,17 @@
+# ── Secrets (never ship) ──
+.env
+.env.*
+!.env.example
+*.env
+.birdeye.env
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+.vercel/
+
+# ── Local dev scratch ──
+.local-cache/
+*.log
+.DS_Store
+.vercel
