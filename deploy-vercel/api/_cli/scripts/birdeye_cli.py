@@ -9430,17 +9430,28 @@ def cmd_junk_predict(args):
                 "token_address": address,
             },
         )
-        holders = (((dist_raw or {}).get("data") or {}).get("holders") or [])
-        pcts: list[float] = []
+        dist_data = (dist_raw or {}).get("data") or {}
+        holders = dist_data.get("holders") or []
+        summary_pct = _jml._to_float((dist_data.get("summary") or {}).get("percent_of_supply"))
+        raw_pcts: list[float] = []
         for holder in holders[:10]:
             val = _jml._to_float(holder.get("percentOfSupply"))
             if val is None:
                 val = _jml._to_float(holder.get("percent_of_supply"))
             if val is None:
                 continue
-            pcts.append(val * 100.0 if val <= 1.0 else val)
-        if not pcts:
+            raw_pcts.append(val)
+        if not raw_pcts:
             return None
+        # The whole holder list shares ONE scale: the API returns either fractions (0..1) or
+        # percentages (0..100). Decide once for the list, never per-holder -- a holder under 1%
+        # (e.g. 0.262) must NOT be inflated by x100. summary.percent_of_supply is the tie-breaker.
+        total = sum(raw_pcts)
+        if summary_pct is not None:
+            scale = 100.0 if abs(total * 100.0 - summary_pct) < abs(total - summary_pct) else 1.0
+        else:
+            scale = 100.0 if total <= 1.0 else 1.0
+        pcts: list[float] = [v * scale for v in raw_pcts]
         return {
             "top1_pct": round(sum(pcts[:1]), 6),
             "top3_pct": round(sum(pcts[:3]), 6),
