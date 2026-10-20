@@ -23,6 +23,7 @@ same `config --apply <KEY>` from the screener feeds this CLI too.
 from __future__ import annotations
 
 import argparse
+import base64
 import csv
 import datetime as _dt
 import html
@@ -2694,6 +2695,9 @@ def build_parser():
                     help="Optional JSON object to override Function or Supervised params at runtime.")
     pj.add_argument("--include", default=None,
                     help="Optional include flags. Supported: holding_distribution")
+    pj.add_argument("--score-b64", default=None,
+                    help="0-CU re-score: base64(JSON) of a previous junk-predict run "
+                         "(envelope or results[]). Skips every Birdeye call, only re-runs the scorer.")
     pj.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered"], default="ui")
     pj.set_defaults(func=cmd_junk_predict)
 
@@ -9386,22 +9390,42 @@ def cmd_junk_predict(args):
         "robinhood": "robinhood",
     }.get(chain, chain)
     key = _load_key()
-    if not key:
+    # 0-CU re-score: --score-b64 carries base64(JSON) of a previous junk-predict
+    # envelope (or its results[] rows). Nothing is fetched from Birdeye here.
+    score_only_rows: dict[str, dict[str, Any]] = {}
+    score_b64 = str(getattr(args, "score_b64", None) or "").strip()
+    if score_b64:
+        try:
+            payload = json.loads(base64.b64decode(score_b64.encode("ascii")).decode("utf-8"))
+        except Exception as e:
+            sys.stderr.write(f"[junk-predict] invalid --score-b64 payload: {e}\n")
+            return 2
+        rows = payload.get("results") if isinstance(payload, dict) else payload
+        for row in rows if isinstance(rows, list) else []:
+            if isinstance(row, dict) and row.get("address"):
+                score_only_rows[str(row["address"])] = row
+        if not score_only_rows:
+            sys.stderr.write("[junk-predict] --score-b64 payload has no token rows.\n")
+            return 2
+    if not key and not score_only_rows:
         sys.stderr.write("[junk-predict] missing BIRDEYE_API_KEY.\n")
         return 2
-    if not raw_tokens:
+    if not raw_tokens and not score_only_rows:
         sys.stderr.write("[junk-predict] --tokens is required.\n")
         return 2
 
     # Parse token list: comma, newline, tab, or whitespace separated
-    addresses: list[str] = []
-    for chunk in raw_tokens.replace("\n", ",").split(","):
-        for addr in chunk.strip().split():
-            if addr:
-                addresses.append(addr)
-    if not addresses:
-        sys.stderr.write("[junk-predict] no valid token addresses found.\n")
-        return 2
+    if score_only_rows:
+        addresses = list(score_only_rows.keys())
+    else:
+        addresses: list[str] = []
+        for chunk in raw_tokens.replace("\n", ",").split(","):
+            for addr in chunk.strip().split():
+                if addr:
+                    addresses.append(addr)
+        if not addresses:
+            sys.stderr.write("[junk-predict] no valid token addresses found.\n")
+            return 2
 
     cu = 0
     breakdown_cu: list[str] = []
@@ -9545,6 +9569,46 @@ def cmd_junk_predict(args):
             entry["market_name"] = row.get("name")
             entry["market_source"] = row.get("source")
 
+    def _raw_token_from_entry(entry: dict[str, Any]) -> dict[str, Any]:
+        raw_token: dict[str, Any] = {
+            "chain": CHAINS.get(chain, chain),
+            "mcap_usd": entry.get("mcap"),
+            "fdv_usd": entry.get("fdv"),
+            "liquidity_usd": entry.get("liquidity"),
+            "vol_24h_usd": entry.get("vol_24h"),
+            "tx_24h": entry.get("tx_24h"),
+            "trader_24h": entry.get("trader_24h"),
+            "holder_count": entry.get("holder"),
+            "price_change_24h": entry.get("price_change_24h_pct"),
+            "vol_30d_usd": None,
+        }
+        for hk in ("top1_pct", "top3_pct", "top4_pct", "top5_pct", "top10_pct"):
+            if entry.get(hk) is not None:
+                raw_token[hk] = entry[hk]
+        return raw_token
+
+    def _score_entry(entry: dict[str, Any], raw_token: dict[str, Any]) -> None:
+        pred = _jm.score_token(raw_token, mode=mode, params_override=active_override)
+        entry["junk_score"] = pred["score"]
+        entry["is_junk"] = pred["is_junk"]
+        entry["threshold"] = pred.get("threshold", threshold)
+        entry["mode"] = pred.get("mode", mode)
+        entry["model_name"] = model_name
+        entry["proba"] = pred.get("proba")
+        entry["parts"] = pred.get("parts")
+        entry["healthy_guard"] = pred.get("healthy_guard")
+        entry["alive_guard"] = pred.get("alive_guard")
+        entry["suspicious"] = pred.get("suspicious")
+        entry["price_suspicious"] = pred.get("price_suspicious")
+        entry["holding_suspicious"] = pred.get("holding_suspicious")
+        entry["shared_metrics"] = pred.get("shared_metrics") or {}
+        entry["min_risk_floor_reason"] = pred.get("min_risk_floor_reason")
+        entry["min_risk_floor_applied"] = pred.get("min_risk_floor_applied")
+        entry["holding_rule_alerts"] = (
+            _holding_rule_alerts(entry) if want_holding
+            else {"triggered": False, "tags": [], "reasons": []}
+        )
+
     for addr in addresses:
         short_addr = f"{addr[:6]}...{addr[-4:]}" if len(addr) > 12 else addr
         entry: dict[str, Any] = {
@@ -9557,6 +9621,16 @@ def cmd_junk_predict(args):
             "birdeye_url": f"https://birdeye.so/{web_chain}/token/{addr}",
             "address_kind": "token",
         }
+        if addr in score_only_rows:
+            # 0-CU path: reuse the metrics captured by the previous run.
+            entry.update(score_only_rows[addr])
+            entry["short_address"] = short_addr
+            entry["birdeye_url"] = entry.get("birdeye_url") or f"https://birdeye.so/{web_chain}/token/{addr}"
+            entry["error"] = None
+            entry.pop("holding_distribution_error", None)
+            _score_entry(entry, _raw_token_from_entry(entry))
+            results.append(entry)
+            continue
         try:
             with requests.Session() as s:
                 ov_raw, _ms = _be(s, key, chain, "/defi/token_overview",

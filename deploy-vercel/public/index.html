@@ -158,6 +158,9 @@
   .hitem .hd{font-size:9.5px;color:var(--mute);margin-top:2px;font-family:ui-monospace,monospace;display:flex;gap:6px;flex-wrap:wrap}
   .hitem .hd .hcu{color:var(--warn);font-weight:700}
   .hitem .hd .hbad{color:var(--bad);font-weight:700}
+  .hitem .hmodel{display:flex;align-items:center;gap:5px;margin-top:5px;font-size:9.5px;color:var(--mute);font-family:ui-monospace,monospace}
+  .hitem .hmodel select{font-size:9.5px;font-family:ui-monospace,monospace;background:#0d1017;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:1px 4px;cursor:pointer}
+  .hitem .hmodel select:hover{border-color:var(--accent)}
   .hempty{padding:10px 4px;font-size:11px;color:var(--mute)}
   /* ── Workflow drawer ── */
   .fd-scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .2s;z-index:110}
@@ -598,6 +601,60 @@ function histSave(a){
 function histPush(entry){
   const a = histAll(); a.unshift(entry); histSave(a); renderHistory();
 }
+/* ── 0-CU re-score: swap the Junk-Predict model without touching Birdeye ── */
+const JUNK_MODELS = ["unsupervised","function","supervised"];
+function histJunkModel(r){
+  const argv = r.argv || []; const i = argv.indexOf("--model");
+  return (i >= 0 && argv[i+1]) ? argv[i+1] : "function";
+}
+function histJunkReady(r){
+  return r.skillId === "junk" && r.formats && String(r.formats.json || "").trim().startsWith("{");
+}
+async function rescoreJunk(i, model){
+  const r = histAll()[i]; if(!r) return;
+  if(!keyPresent()){ toast("Add your Birdeye API key first"); toggleKeyFields(); return; }
+  let payload;
+  try{
+    payload = JSON.parse(String(r.formats.json));
+    if(payload && typeof payload === "object") delete payload.html; // html is re-rendered, keeps payload small
+  }catch(e){ toast("No cached data to re-score"); return; }
+  let b64;
+  try{ b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload)))); }
+  catch(e){ toast("Cached data too large to re-score"); return; }
+  const argv = [];
+  const src = r.argv || [];
+  for(let k=0;k<src.length;k++){
+    if(src[k]==="--model" || src[k]==="--format"){ k++; continue; }  // drop old model + format
+    if(src[k]==="--score-b64"){ k++; continue; }
+    argv.push(src[k]);
+  }
+  argv.push("--model", model, "--score-b64", b64, "--format", "ui");
+  $("metaArea").innerHTML = "";
+  $("fmtTabs").style.display = "none";
+  $("cmdLineArea").style.display = "block";
+  $("cmdLineArea").innerHTML = `<div class="cmdline"><button class="copybtn" id="copyCmdBtn">📋 copy</button><span>${esc(cmdString(argv))}</span></div>`;
+  const cb = $("copyCmdBtn"); if(cb) cb.onclick = ()=>copyText(cmdString(argv));
+  $("outputArea").innerHTML = `<div class="rendered-box">Re-scoring (${esc(model)}) from cache…</div>`;
+  try{
+    const res = await fetch("/api/run", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({script:"birdeye_cli", argv, key: state.userKey}),
+    });
+    const raw = await res.json();
+    if(!res.ok){
+      if(raw.error === "api_key_required"){ $("outputArea").innerHTML = '<div class="rendered-box err">API key required — paste your Birdeye key (🔑 Key).</div>'; renderKeyBar(); }
+      else $("outputArea").innerHTML = `<pre class="out_body err">${esc(raw.error||JSON.stringify(raw))}</pre>`;
+      return;
+    }
+    const j = hydrateResult(normalizeRun(raw));
+    showResult(j);
+    const a = histAll();
+    if(a[i]){ a[i] = Object.assign({}, a[i], {ts:Date.now(), cu:0, exit:j.exit, argv, formats:j.formats}); histSave(a); renderHistory(); }
+    toast(`✓ Re-scored (${model}) from cache · 0 CU`);
+  }catch(e){
+    $("outputArea").innerHTML = `<pre class="out_body err">${esc(String(e))}</pre>`;
+  }
+}
 function renderHistory(){
   const a = histAll();
   const n = a.length;
@@ -608,11 +665,21 @@ function renderHistory(){
   el.innerHTML = a.map((r,i)=>{
     const cu = r.cu ? `<span class="hcu">⚡${r.cu} CU</span>` : "";
     const bad = r.exit ? `<span class="hbad">exit ${r.exit}</span>` : "";
+    const modelSel = histJunkReady(r)
+      ? `<div class="hmodel" title="Re-score from cached data (0 CU · no API call)"><span>model</span><select data-i="${i}">`
+        + JUNK_MODELS.map(m=>`<option value="${m}"${m===histJunkModel(r)?" selected":""}>${m}</option>`).join("")
+        + `</select></div>`
+      : "";
     return `<div class="hitem" data-i="${i}" title="Click to replay (0 CU)">`
       + `<div class="hk">${esc(r.icon||"")} ${esc(r.name||r.skillId||"run")}${r.beta?' <span class="betabadge">beta</span>':''}${r.dev?' <span class="devbadge">dev</span>':''}</div>`
-      + `<div class="hd"><span>${fmtTime(r.ts)}</span>${cu}${bad}</div></div>`;
+      + `<div class="hd"><span>${fmtTime(r.ts)}</span>${cu}${bad}</div>${modelSel}</div>`;
   }).join("");
-  el.querySelectorAll(".hitem").forEach(c=>c.onclick=()=>replayRun(parseInt(c.dataset.i,10)));
+  el.querySelectorAll(".hitem").forEach(c=>{
+    const sel = c.querySelector("select[data-i]");
+    if(sel){ sel.onclick = e=>e.stopPropagation();
+             sel.onchange = e=>{ e.stopPropagation(); rescoreJunk(parseInt(sel.dataset.i,10), sel.value); }; }
+    c.onclick = ()=>replayRun(parseInt(c.dataset.i,10));
+  });
 }
 function replayRun(i){
   const r = histAll()[i]; if(!r) return;
