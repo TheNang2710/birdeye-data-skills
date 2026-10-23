@@ -1,0 +1,13 @@
+{
+  "name": "birdeye-skills",
+  "version": "1.0.0",
+  "description": "Birdeye on-chain discovery & insight skills — token due-diligence score, wallet score & style, candlestick patterns, momentum and junk-token prediction, all through one CLI.",
+  "author": {
+    "name": "nguyenthenang",
+    "email": "nguyenthenang89@gmail.com"
+  },
+  "repository": "https://github.com/TheNang2710/birdeye-data-skills",
+  "license": "MIT",
+  "keywords": ["birdeye", "crypto", "solana", "token", "defi", "screener", "due-diligence", "wallet", "cli"],
+  "skills": "./skills/"
+}

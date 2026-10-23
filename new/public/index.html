@@ -1,0 +1,1143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Birdeye Skills — Console</title>
+<style>
+  :root{
+    --bg:#0b0d12; --panel:#141821; --panel2:#1a1f2b; --line:#262c3a;
+    --text:#e6e9f2; --mute:#8b95ad; --accent:#5b9dff; --accent2:#7c5bff;
+    --good:#22c55e; --warn:#f59e0b; --bad:#ef4444;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font:13px/1.45 ui-sans-serif,-apple-system,"Segoe UI",Inter,system-ui,sans-serif;height:100vh;overflow:hidden}
+  header{padding:8px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px;background:linear-gradient(180deg,#0f1320,#0b0d12);flex-wrap:wrap}
+  header h1{font-size:13px;margin:0;font-weight:700;letter-spacing:.2px}
+  header h1 .sub{font-weight:500;color:var(--mute);margin-left:6px;font-size:11.5px}
+  .pill{font-size:11px;color:var(--mute)}
+  .headRight{margin-left:auto;display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+  .histToggle{background:linear-gradient(180deg,#232b3b,#171d29);border:1px solid rgba(123,170,255,.22);border-radius:999px;padding:7px 14px;font-size:12.5px;font-weight:800;letter-spacing:.2px;color:var(--text);cursor:pointer;white-space:nowrap;transition:.12s;box-shadow:0 0 0 1px rgba(91,157,255,.08)}
+  .histToggle:hover{border-color:var(--accent);color:var(--accent)}
+  .histToggle .n{font-size:10px;background:rgba(255,255,255,.14);border-radius:999px;padding:0 6px;margin-left:6px}
+  .histToggle.off{opacity:.6}
+  /* ── API key bar ── */
+  .keybar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;flex:1 1 420px;min-width:min(100%,420px)}
+  .keypanel{display:flex;flex-direction:column;gap:5px;min-width:min(100%,520px)}
+  .keytop{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .keystate{font-size:11px;padding:3px 9px;border-radius:999px;border:1px solid var(--line);background:var(--panel);white-space:nowrap}
+  .keystate.ok{color:var(--good);border-color:rgba(34,197,94,.4);background:rgba(34,197,94,.08)}
+  .keystate.warn{color:var(--warn);border-color:rgba(245,158,11,.4);background:rgba(245,158,11,.08)}
+  .keyhint{font-size:10.5px;color:var(--mute)}
+  .keyfields{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+  .keyinput{position:relative;display:flex;align-items:center}
+  .keyinput input{width:320px;max-width:min(72vw,420px);background:#0d1017;border:1px solid var(--line);border-radius:7px;padding:5px 32px 5px 9px;font-size:12px;outline:none;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;letter-spacing:.2px;color:var(--text)}
+  .keyinput input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,157,255,.14)}
+  .eyebtn{position:absolute;right:4px;background:none;border:none;color:var(--mute);cursor:pointer;font-size:13px;line-height:1;padding:4px;border-radius:6px}
+  .eyebtn:hover{color:var(--text);background:var(--panel2)}
+  .btn{background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:7px;padding:5px 10px;font-size:11.5px;font-weight:600;cursor:pointer;white-space:nowrap;transition:.12s}
+  .btn:hover{border-color:var(--accent);color:var(--accent)}
+  .btn.primary{background:linear-gradient(180deg,#3b7be8,#2c60c4);border-color:transparent;color:#fff}
+  .btn.primary:hover{color:#fff;opacity:.92}
+  .btn.ghost{background:transparent}
+  .btn.dim{opacity:.7}
+  /* ── Layout ── */
+  .layout{display:grid;grid-template-columns:232px minmax(0,1fr) 300px;height:calc(100vh - 58px)}
+  .layout.no-hist{grid-template-columns:232px minmax(0,1fr) 0}
+  nav{padding:8px;border-right:1px solid var(--line);overflow:hidden;background:#0d1017;display:flex;flex-direction:column;gap:6px}
+  .sc{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:6px 8px;cursor:pointer;transition:.15s;display:flex;gap:8px;align-items:flex-start;position:relative;min-height:0}
+  .sc:hover{border-color:var(--accent);background:var(--panel2)}
+  .sc.active{border-color:var(--accent);background:linear-gradient(180deg,#16203a,#141821);box-shadow:0 0 0 1px rgba(91,157,255,.4)}
+  .sc .ic{font-size:15px;line-height:1.3;flex-shrink:0}
+  .sc .body{flex:1;min-width:0;padding-right:32px}
+  .sc .nm{font-weight:600;font-size:11.25px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sc .ds{font-size:10px;color:var(--mute);margin-top:2px;line-height:1.32;display:-webkit-box;line-clamp:1;-webkit-line-clamp:1;-webkit-box-orient:vertical;overflow:hidden}
+  .sc .gbad{position:absolute;top:7px;right:7px;font-size:9px;padding:1px 6px;border-radius:5px;background:var(--panel2);border:1px solid var(--line);color:var(--mute);font-weight:700;letter-spacing:.3px;line-height:1.45}
+  .sc[data-grp="list"] .gbad{background:rgba(245,158,11,.12);color:#ffb94d;border-color:rgba(245,158,11,.3)}
+  .sc[data-grp="token"] .gbad{background:rgba(91,157,255,.12);color:#7ab0ff;border-color:rgba(91,157,255,.3)}
+  .sc[data-grp="wallet"] .gbad{background:rgba(124,91,255,.12);color:#a58bff;border-color:rgba(124,91,255,.3)}
+  .betabadge,.devbadge{font-size:8.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;border-radius:4px;padding:0 4px;margin-left:5px;vertical-align:middle;white-space:nowrap}
+  .betabadge{color:#ffb94d;background:rgba(245,158,11,.13);border:1px solid rgba(245,158,11,.35)}
+  .devbadge{color:#8cc8ff;background:rgba(91,157,255,.13);border:1px solid rgba(91,157,255,.35)}
+  .empty{padding:12px 4px;font-size:11.5px;color:var(--mute)}
+  section.out{padding:12px 16px 18px;overflow:auto;height:100%;min-width:0}
+  .form{background:linear-gradient(180deg,#141a26,#111621);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:12px;box-shadow:0 18px 44px rgba(0,0,0,.18)}
+  .form.rugForm{background:linear-gradient(180deg,#151c29,#121824)}
+  .form.walletForm{background:linear-gradient(180deg,#171729,#121420)}
+  .form .hd{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:10px;gap:10px}
+  .form .hd .ttgrp{flex:1;min-width:0}
+  .form .hd .ttl{display:block;font-weight:700;font-size:13px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .form .hd .formSub{font-size:11px;color:var(--mute);margin-top:3px;line-height:1.45}
+  .form .hd .hdActions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+  .form .hd .cmdbadge{font-family:ui-monospace,monospace;font-size:10px;color:var(--mute);background:#0d1017;padding:2px 6px;border-radius:999px;border:1px solid var(--line);cursor:pointer}
+  .form .hd .cmdbadge:hover{color:var(--accent);border-color:var(--accent)}
+  .flowBtn{background:linear-gradient(180deg,#5b9dff,#2c60c4);border:1px solid rgba(123,170,255,.35);color:#fff;border-radius:999px;padding:7px 14px;font-size:12.5px;font-weight:800;letter-spacing:.2px;cursor:pointer;white-space:nowrap;transition:.12s;box-shadow:0 0 0 1px rgba(91,157,255,.15),0 8px 24px rgba(44,96,196,.22)}
+  .flowBtn:hover{border-color:#9dc3ff;color:#fff;filter:brightness(1.05)}
+  .fgrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:7px 10px;align-items:end}
+  .ddCompactRow{display:flex;align-items:flex-end;gap:8px;flex-wrap:wrap}
+  .ddCompactRow .fld{flex:0 0 auto}
+  .ddCompactRow .fld[data-dd-field="chain"]{width:104px}
+  .ddCompactRow .fld[data-dd-field="address"]{width:min(420px,46vw)}
+  .ddCompactRow .fld[data-dd-field="wallet"]{width:min(440px,50vw)}
+  .ddCompactRow .fld[data-dd-field="tokens"]{width:min(560px,56vw)}
+  .ddCompactRow .fld[data-dd-field="mode"]{width:128px}
+  .ddCompactRow .fld[data-dd-field="model"],.ddCompactRow .fld[data-dd-field="duration"],.ddCompactRow .fld[data-dd-field="pnl_method"],.ddCompactRow .fld[data-dd-field="resolution"],.ddCompactRow .fld[data-dd-field="window"],.ddCompactRow .fld[data-dd-field="candles"]{width:auto;min-width:92px}
+  .ddCompactRow .toggleField{flex:0 0 auto;max-width:100%}
+  .ddCompactRow .toggleField .chk-row{min-height:36px;align-items:center}
+  .ddCompactRow .ddInlineActions{margin-left:auto}
+  .ddInlineActions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding-bottom:1px}
+  .ddInlineActions .cu-badge{margin-left:0}
+  .fld{display:flex;flex-direction:column;gap:3px;min-width:0}
+  .fld>label{font-size:9.5px;color:var(--mute);letter-spacing:.35px;text-transform:uppercase;font-weight:700}
+  .fld.wide{grid-column:span 2}
+  .fld input[type=text],.fld select,.fld textarea{width:100%;background:#0d1017;border:1px solid var(--line);border-radius:7px;padding:5px 8px;font-size:12px;outline:none;transition:.12s;min-height:36px;color:var(--text);font-family:inherit}
+  .fld textarea{min-height:76px;resize:vertical;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}
+  .fld input[type=text]:focus,.fld select:focus,.fld textarea:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(91,157,255,.14)}
+  .fld.mono input[type=text]{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px;letter-spacing:.2px}
+  .mainInput input[type=text],.mainInput textarea{min-height:42px;font-size:13px;border-radius:10px;padding:9px 10px;background:#0b0f17}
+  .skillHero{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(210px,1fr);gap:10px;margin-bottom:10px}
+  .heroCopy{padding:12px 13px;border:1px solid rgba(123,170,255,.15);border-radius:12px;background:linear-gradient(180deg,rgba(91,157,255,.12),rgba(91,157,255,.04))}
+  .walletHero .heroCopy{border-color:rgba(124,91,255,.2);background:linear-gradient(180deg,rgba(124,91,255,.14),rgba(124,91,255,.05))}
+  .heroKicker{font-size:10px;letter-spacing:.42px;text-transform:uppercase;color:#9ab8ff;font-weight:800}
+  .walletHero .heroKicker{color:#b59dff}
+  .heroDesc{font-size:12px;line-height:1.55;margin-top:5px}
+  .heroTags{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+  .heroTag{display:inline-flex;align-items:center;gap:5px;padding:4px 9px;border-radius:999px;background:rgba(8,10,15,.75);border:1px solid rgba(123,170,255,.18);font-size:10.5px;color:#d8e3ff}
+  .walletHero .heroTag{border-color:rgba(124,91,255,.22);color:#e3dcff}
+  .walletBrief{margin-bottom:10px;padding:9px 12px;border:1px solid rgba(124,91,255,.2);border-radius:10px;background:rgba(124,91,255,.06);font-size:12px;line-height:1.5;color:var(--text)}
+  .heroStats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+  .spotCard{padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:#0d1017}
+  .spotEyebrow{display:block;font-size:9.5px;letter-spacing:.36px;text-transform:uppercase;color:var(--mute);font-weight:700}
+  .spotValue{display:block;font-size:16px;font-weight:800;letter-spacing:.2px;margin-top:4px}
+  .spotHint{display:block;font-size:10.5px;color:var(--mute);margin-top:4px;line-height:1.45}
+  .skillSplit{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:10px;align-items:start}
+  .formMain{padding:11px;border:1px solid rgba(255,255,255,.06);border-radius:12px;background:rgba(8,10,15,.5)}
+  .formAside{display:flex;flex-direction:column;gap:10px}
+  .sideCard{padding:11px 12px;border-radius:12px;border:1px solid var(--line);background:#0d1017}
+  .sideKicker{font-size:9.8px;letter-spacing:.36px;text-transform:uppercase;color:var(--mute);font-weight:800;margin-bottom:8px}
+  .sideText{font-size:11.5px;color:var(--text);line-height:1.55}
+  .focusList{display:flex;flex-wrap:wrap;gap:6px}
+  .focusChip{display:inline-flex;align-items:center;padding:4px 9px;border-radius:999px;background:rgba(91,157,255,.1);border:1px solid rgba(91,157,255,.18);font-size:10.5px;color:#cfe0ff}
+  .walletForm .focusChip{background:rgba(124,91,255,.11);border-color:rgba(124,91,255,.2);color:#e0d4ff}
+  .walletLead{grid-template-columns:1fr}
+  .walletControls{margin-top:10px}
+  .chk-row{display:flex;flex-wrap:wrap;gap:6px}
+  .chk{display:inline-flex;align-items:center;gap:6px;background:#0d1017;border:1px solid var(--line);border-radius:999px;padding:5px 9px;font-size:11px;cursor:pointer;user-select:none;transition:.12s}
+  .chk:hover{border-color:var(--accent)}
+  .chk input{accent-color:var(--accent);margin:0}
+  .form-foot{display:flex;align-items:center;gap:10px;margin-top:8px;padding-top:8px;border-top:1px solid var(--line);flex-wrap:wrap}
+  .run{background:linear-gradient(180deg,#3b7be8,#2c60c4);border:none;border-radius:8px;padding:6px 12px;font-weight:600;cursor:pointer;font-size:12px;white-space:nowrap;box-shadow:0 1px 0 rgba(255,255,255,.1) inset;color:#fff}
+  .run:disabled{opacity:.45;cursor:not-allowed}
+  .runhint{font-size:10.5px;color:var(--mute)}
+  .cu-badge{margin-left:auto;font-size:10px;color:var(--warn);font-weight:700;background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);padding:2px 8px;border-radius:999px}
+  .cmdline{background:#080a0f;border:1px solid var(--line);border-radius:7px;padding:6px 9px;margin-bottom:8px;font-family:ui-monospace,monospace;font-size:11px;color:#cdd3df;word-break:break-all;display:flex;align-items:center;gap:8px}
+  .cmdline .copybtn{background:var(--panel2);border:1px solid var(--line);border-radius:5px;color:var(--mute);font-size:10px;padding:2px 7px;cursor:pointer;flex-shrink:0}
+  .cmdline .copybtn:hover{color:var(--accent);border-color:var(--accent)}
+  .meta{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:8px;font-size:11px;color:var(--mute)}
+  .meta .chip{background:var(--panel);border:1px solid var(--line);padding:2px 8px;border-radius:999px}
+  .cu-chip{color:var(--warn);font-weight:600}
+  .cache-chip{color:var(--good);font-weight:600}
+  pre.out_body{background:#080a0f;border:1px solid var(--line);border-radius:9px;padding:11px;overflow:visible;margin:0;white-space:pre-wrap;word-break:break-word;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;line-height:1.5;max-height:none}
+  .rendered-box{background:#080a0f;border:1px solid var(--line);border-radius:9px;padding:11px;overflow:visible;max-height:none}
+  .err{color:var(--bad)}
+  .fmt-tabs{display:flex;gap:4px;margin-bottom:8px}
+  .fmt-tab{background:var(--panel);border:1px solid var(--line);border-radius:7px 7px 0 0;padding:6px 16px;font-size:12px;font-weight:600;cursor:pointer;color:var(--mute);border-bottom:none;transition:.12s}
+  .fmt-tab:hover{color:var(--text)}
+  .fmt-tab.active{background:#080a0f;color:var(--accent);border-color:var(--accent)}
+  .fmt-tab .cu-note{font-size:9.5px;color:var(--good);margin-left:4px;font-weight:500}
+  .out-actions{display:none;align-items:center;justify-content:flex-end;gap:8px;margin:-2px 0 8px}
+  .out-actions.show{display:flex}
+  .out-actions .copybtn{background:var(--panel2);border:1px solid var(--line);border-radius:7px;color:var(--mute);font-size:11px;padding:5px 10px;cursor:pointer}
+  .out-actions .copybtn:hover{color:var(--accent);border-color:var(--accent)}
+  .copy-addr:hover{color:var(--accent)!important}
+  .addr-ext{margin-left:3px;color:var(--accent);text-decoration:none;font-size:11px;opacity:.75;cursor:pointer}
+  .addr-ext:hover{opacity:1}
+  #toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%) translateY(16px);background:#1a1f2b;border:1px solid var(--accent);color:var(--text);padding:8px 16px;border-radius:999px;font-size:12px;opacity:0;pointer-events:none;transition:.2s;z-index:99;box-shadow:0 10px 30px rgba(0,0,0,.55)}
+  #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  /* ── Recent runs (collapsible) ── */
+  aside.hist{border-left:1px solid var(--line);background:#0d1017;overflow:hidden;height:100%;transition:.18s;display:flex;flex-direction:column;min-width:0}
+  .layout.no-hist aside.hist{display:none}
+  .hh{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:6px;padding:8px 10px;background:#0d1017;border-bottom:1px solid var(--line);user-select:none}
+  .hh .t{font-size:10.5px;font-weight:700;letter-spacing:.4px;text-transform:uppercase;color:var(--mute)}
+  .hh .hcnt{font-size:9.5px;background:var(--panel2);border:1px solid var(--line);border-radius:999px;padding:0 6px;color:var(--mute)}
+  .hh .hh-actions{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .hh .hchev{color:var(--mute);font-size:12px;transition:.18s;cursor:pointer;padding:2px 4px;border-radius:6px}
+  .hh .hchev:hover{color:var(--text);background:var(--panel2)}
+  .hh button{background:none;border:none;color:var(--mute);cursor:pointer;font-size:12px;padding:2px 5px;border-radius:5px}
+  .hh button:hover{color:var(--bad);background:var(--panel2)}
+  .hbody{padding:8px;overflow:auto;min-height:0}
+  .hitem{background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:7px 9px;margin-bottom:6px;cursor:pointer;transition:.12s}
+  .hitem:hover{border-color:var(--accent);background:var(--panel2)}
+  .hitem .hk{font-size:11.5px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .hitem .hd{font-size:9.5px;color:var(--mute);margin-top:2px;font-family:ui-monospace,monospace;display:flex;gap:6px;flex-wrap:wrap}
+  .hitem .hd .hcu{color:var(--warn);font-weight:700}
+  .hitem .hd .hbad{color:var(--bad);font-weight:700}
+  .hitem .hmodel{display:flex;align-items:center;gap:5px;margin-top:5px;font-size:9.5px;color:var(--mute);font-family:ui-monospace,monospace}
+  .hitem .hmodel select{font-size:9.5px;font-family:ui-monospace,monospace;background:#0d1017;color:var(--txt);border:1px solid var(--line);border-radius:6px;padding:1px 4px;cursor:pointer}
+  .hitem .hmodel select:hover{border-color:var(--accent)}
+  .hempty{padding:10px 4px;font-size:11px;color:var(--mute)}
+  /* ── Workflow drawer ── */
+  .fd-scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);opacity:0;pointer-events:none;transition:opacity .2s;z-index:110}
+  .fd-scrim.show{opacity:1;pointer-events:auto}
+  .flow-drawer{position:fixed;top:0;right:0;height:100vh;width:min(34vw,560px);min-width:320px;background:var(--panel);border-left:1px solid var(--line);box-shadow:-18px 0 44px rgba(0,0,0,.55);transform:translateX(100%);transition:transform .22s ease;z-index:120;display:flex;flex-direction:column}
+  .flow-drawer.open{transform:translateX(0)}
+  .fd-head{display:flex;align-items:center;gap:8px;padding:11px 14px;border-bottom:1px solid var(--line);background:linear-gradient(180deg,#0f1320,#0b0d12)}
+  .fd-head .t{font-weight:700;font-size:13px;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .fd-head button{background:none;border:none;color:var(--mute);font-size:16px;cursor:pointer;line-height:1}
+  .fd-head button:hover{color:var(--text)}
+  .fd-body{padding:14px;overflow:auto;font-size:12.5px;line-height:1.55}
+  .fd-sec{margin-bottom:18px}
+  .fd-sec h4{margin:0 0 8px;font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--mute);font-weight:700}
+  .flowStep{display:flex;gap:9px;padding:6px 0;align-items:flex-start}
+  .flowStep .n{flex:0 0 22px;height:22px;border-radius:50%;background:var(--accent);color:#fff;font-size:11px;font-weight:700;display:flex;align-items:center;justify-content:center}
+  .flowStep .txt{flex:1}
+  .promptBox{padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#0d1017;cursor:pointer;font-size:12px;line-height:1.55}
+  .promptBox:hover{border-color:var(--accent)}
+  .fd-caps{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px}
+  .fd-caps li{position:relative;padding-left:15px;font-size:12px;line-height:1.5}
+  .fd-caps li::before{content:"▸";position:absolute;left:0;top:1px;color:var(--accent);font-size:10px}
+  .fd-sec h4 .tag{font-weight:600;letter-spacing:0;text-transform:none;color:var(--mute);opacity:.8}
+  /* ── Group filter bar (inside nav) ── */
+  .grpbar{position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin:-8px -8px 6px;padding:8px;background:#0d1017;border-bottom:1px solid var(--line)}
+  .grpbar .lbl{font-size:9.5px;color:var(--mute);font-weight:700;letter-spacing:.4px;text-transform:uppercase}
+  .grp{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 9px;font-size:10.5px;font-weight:600;color:var(--mute);cursor:pointer;transition:.12s;white-space:nowrap;display:inline-flex;align-items:center;gap:4px}
+  .grp:hover{color:var(--text);border-color:var(--accent)}
+  .grp.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+  .grp .cnt{font-size:9px;opacity:.75;background:rgba(255,255,255,.15);padding:0 5px;border-radius:999px}
+  @media (max-width:1450px){.layout{grid-template-columns:216px minmax(0,1fr) 276px}.layout.no-hist{grid-template-columns:216px minmax(0,1fr) 0}.sc{padding:6px 7px}.sc .body{padding-right:30px}.sc .nm{font-size:11px}.sc .ds{font-size:9.7px}}
+  @media (max-width:1280px){.fld.wide{grid-column:1/-1}.skillSplit{grid-template-columns:1fr}.formAside{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px}}
+  @media (max-width:900px){.ddCompactRow{display:grid;grid-template-columns:1fr}.ddCompactRow .fld[data-dd-field]{width:auto}.ddCompactRow .ddInlineActions{margin-left:0}.ddInlineActions{padding-top:2px}}
+  @media (max-width:1100px){.layout{grid-template-columns:230px 1fr}.layout:not(.no-hist) aside.hist{grid-column:1/-1;border-left:none;border-top:1px solid var(--line);max-height:230px}}
+  @media (max-width:820px){
+    body{height:auto;overflow:auto}
+    .layout{grid-template-columns:1fr;height:auto;min-height:calc(100vh - 58px)}
+    nav{border-right:none;border-bottom:1px solid var(--line);max-height:340px;overflow:auto}
+    section.out{height:auto}
+    aside.hist{height:auto;max-height:230px}
+    .skillHero{grid-template-columns:1fr}
+    .heroStats{grid-template-columns:1fr 1fr}
+    .keybar{margin-left:0;width:100%}
+    .keypanel{min-width:0;width:100%}
+    .keyinput{flex:1;min-width:0}
+    .keyinput input{width:100%;max-width:none}
+    .headRight{margin-left:0;width:100%;justify-content:flex-end}
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>🧪 Birdeye Skills<span class="sub">Console</span></h1>
+  <div class="keybar">
+    <div class="keypanel">
+      <div class="keytop">
+        <span class="keystate" id="keyState">checking key…</span>
+        <span class="keyhint" id="keyHint">Bring your own Birdeye API key. Stored in this browser only.</span>
+      </div>
+      <div class="keyfields" id="keyFields">
+        <div class="keyinput">
+          <input type="password" id="apiKey" placeholder="Paste your Birdeye API key here" autocomplete="off" spellcheck="false" autocapitalize="off">
+          <button class="eyebtn" id="eyeBtn" title="Show / hide key" aria-label="Show or hide API key">👁</button>
+        </div>
+        <button class="btn primary" id="keyUseBtn">Use this key</button>
+        <button class="btn ghost dim" id="keyClearBtn" title="Forget the saved key">Clear</button>
+      </div>
+    </div>
+  </div>
+  <div class="headRight">
+    <span class="pill" id="modePill">…</span>
+    <button class="histToggle" id="histToggle" title="Show history panel">&lt;&lt;&lt; History<span class="n" id="histToggleCnt">0</span></button>
+  </div>
+</header>
+<div class="layout" id="layout">
+  <nav id="skillList"></nav>
+  <section class="out">
+    <div class="form" id="formArea"></div>
+    <div id="cmdLineArea" style="display:none"></div>
+    <div class="meta" id="metaArea"></div>
+    <div class="fmt-tabs" id="fmtTabs" style="display:none">
+      <button class="fmt-tab active" data-fmt="ui">🖥️ UI</button>
+      <button class="fmt-tab" data-fmt="plain">📄 Plain<span class="cu-note">0 CU</span></button>
+      <button class="fmt-tab" data-fmt="json">{ } JSON<span class="cu-note">0 CU</span></button>
+      <button class="fmt-tab" data-fmt="telegram">✈️ Telegram<span class="cu-note">0 CU</span></button>
+    </div>
+    <div class="out-actions" id="outputActions"></div>
+    <div id="outputArea"></div>
+  </section>
+  <aside class="hist" id="histPanel">
+    <div class="hh" id="histHead">
+      <span class="t">🕘 History</span><span class="hcnt" id="histCnt">0</span>
+      <div class="hh-actions">
+        <button id="histClear" title="Clear history">🗑</button>
+        <span class="hchev" id="histChev" title="Collapse / expand history">▾</span>
+      </div>
+    </div>
+    <div class="hbody" id="historyList"></div>
+  </aside>
+</div>
+<script>
+"use strict";
+const CHAINS = ["sol","bsc","base","eth","arc","robinhood"];
+function optLabel(v){
+  const m = {sol:"solana", eth:"ethereum", arc:"arbitrum", "":"(all)", unsupervised:"Unsupervised", function:"Function", supervised:"Supervised"};
+  return m[v] || v;
+}
+function cliFormatForSkill(skill, fmt){
+  const f = String(fmt || "ui").toLowerCase();
+  if(["ui","json","telegram","plain"].includes(f)) return f;
+  if(f === "raw-json") return "json";
+  if(f === "render" || f === "rendered" || f === "scorecard" || f === "rugcheck" || f === "compact") return "ui";
+  return f || "ui";
+}
+function canonFormatName(fmt){
+  const f = String(fmt || "").toLowerCase();
+  if(f === "render" || f === "rendered" || f === "scorecard" || f === "rugcheck" || f === "compact") return "ui";
+  if(f === "raw-json") return "json";
+  if(f === "plain" || f === "telegram" || f === "json" || f === "ui") return f;
+  return f || "ui";
+}
+const SKILLS = [
+  {id:"token_dd_score", icon:"🧠", name:"Token Due-Diligence Score", desc:"5-pillar 0-100 due-diligence score with an A+..F risk rating", cmd:"token-dd-score", type:"token", cu:"51-181", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"address",label:"Token",type:"text",def:""},
+    {k:"mode",label:"Mode",type:"select",opts:["standard","advanced"],def:"standard"},
+  ]},
+  {id:"kline", icon:"🕯️", name:"Kline Pattern", desc:"Candlestick pattern recognition + score", cmd:"kline-pattern", type:"token", cu:"25-100", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"address",label:"Token",type:"text",def:""},
+    {k:"resolution",label:"Resolution",type:"select",opts:["1m","5m","15m","30m","1h","4h","1d"],def:"15m"},
+    {k:"window",label:"Window",type:"select",opts:["1d","3d","7d","14d","30d"],def:"7d"},
+  ]},
+  {id:"trending_score", icon:"📈", name:"Token Trending Score", desc:"0-100 momentum score across 8 intervals", cmd:"token-trending-score", type:"token", cu:"~171", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"address",label:"Token",type:"text",def:""},
+    {k:"model",label:"Model",type:"select",opts:["classic","hybrid"],def:"classic"},
+    {k:"candles",label:"Candles",type:"text",def:"5000"},
+    {k:"nocache",label:"Bypass cache (fresh)",type:"checkbox",def:false},
+  ]},
+  {id:"junk", icon:"🧟", name:"Junk Token Predict", desc:"Token junk score with Unsupervised (LR16), Function (heuristic) or Supervised (GBM) model", cmd:"junk-predict", type:"token", cu:"21/token", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"tokens",label:"Token addresses (space, comma, or newline separated)",type:"textarea",def:""},
+    {k:"model",label:"Model",type:"select",opts:["unsupervised","function","supervised"],def:"unsupervised"},
+    {k:"include_holding_distribution",label:"Include holding distribution (+30 CU/token)",type:"checkbox",def:false},
+  ]},
+  {id:"wallet_score", icon:"📊", name:"Wallet Score", desc:"0-100 alpha score + copy-tradeability score", cmd:"wallet-score", type:"wallet", cu:"30-110", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"wallet",label:"Wallet",type:"text",def:""},
+    {k:"duration",label:"Duration",type:"select",opts:["24h","7d","30d","90d","all"],def:"30d"},
+    {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
+    {k:"skip_rug",label:"Skip rug",type:"checkbox",def:false},
+    {k:"skip_portfolio",label:"Skip portfolio",type:"checkbox",def:false},
+    {k:"skip_first_tx",label:"Skip first-tx",type:"checkbox",def:false},
+    {k:"include_style",label:"Include style",type:"checkbox",def:false},
+  ]},
+  {id:"wallet_style", icon:"🎭", name:"Wallet Style", desc:"Classify trading style from PnL + trade patterns", cmd:"wallet-style", type:"wallet", cu:"~90", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
+    {k:"wallet",label:"Wallet",type:"text",def:""},
+    {k:"duration",label:"Duration",type:"select",opts:["7d","30d"],def:"30d"},
+    {k:"pnl_method",label:"PnL method",type:"select",opts:["wac","net_cash"],def:"wac"},
+    {k:"skip_tx_list",label:"Skip tx-list",type:"checkbox",def:false},
+    {k:"skip_first_tx",label:"Skip first-tx",type:"checkbox",def:false},
+  ]},
+];
+
+/* Group filter keys mirror each skill's `type`; hidden cards stay defined
+   (just flagged) so they are easy to bring back. */
+const GROUPS = {
+  all:    {label:"All",      icon:"✦", badge:"ALL"},
+  list:   {label:"Discover", icon:"🔥", badge:"DSC"},
+  token:  {label:"Token",    icon:"🔍", badge:"TKN"},
+  wallet: {label:"Wallet",   icon:"📊", badge:"WAL"},
+};
+const IS_LOCAL_HOST = ["localhost", "127.0.0.1"].includes(location.hostname) || location.hostname === "";
+const VISIBLE = SKILLS.filter(s => !s.hidden);
+
+const LS_KEY = "birdeye.apiKey";
+const LS_HIST = "birdeye.runs";
+const LS_HISTOPEN = "birdeye.histOpen";
+const WALLET_SKILL_IDS = new Set(["wallet_score","wallet_style"]);
+const WALLET_LENSES = {
+  wallet_score:["Alpha score","Copy-tradeability","Risk filters","Portfolio context"],
+  wallet_style:["Style labels","Trade rhythm","Holding profile","Conviction"],
+};
+const WALLET_BRIEF = {
+  wallet_score:"Score one wallet's alpha and copy-tradeability from PnL, consistency, quality and activity.",
+  wallet_style:"Tag one wallet's trading style from its frequency × P&L grid.",
+};
+const state = {
+  skill: VISIBLE[0],
+  group: "all",
+  meta: null,          // /api/meta payload (or fallback)
+  userKey: "",         // key pasted by the visitor
+  last: null,          // last normalised result
+  fmt: "ui",
+  histOpen: true,
+};
+
+/* ── helpers ─────────────────────────────────────────────────────────── */
+function $(id){ return document.getElementById(id); }
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+let _toastTimer;
+function toast(msg){
+  let t = $("toast");
+  if(!t){ t=document.createElement("div"); t.id="toast"; document.body.appendChild(t); }
+  t.textContent = msg; t.classList.add("show");
+  clearTimeout(_toastTimer); _toastTimer = setTimeout(()=>t.classList.remove("show"), 1600);
+}
+function copyText(t){
+  if(!t) return;
+  const done = ()=>toast("✓ Copied");
+  if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(t).then(done, ()=>toast("Copy failed")); }
+  else { const a=document.createElement("textarea"); a.value=t; document.body.appendChild(a); a.select(); try{ document.execCommand("copy"); done(); }catch{ toast("Copy failed"); } a.remove(); }
+}
+function chainSlug(ch){ const m={sol:"solana",eth:"ethereum"}; return m[(ch||"").toLowerCase()]||ch||"sol"; }
+function birdeyeUrl(kind, addr){
+  const ch = chainSlug(($("inp_chain")||{}).value || "sol");
+  return kind==="wallet"
+    ? `https://birdeye.so/${ch}/wallet-analyzer/${addr}?tab=pnl`
+    : `https://birdeye.so/${ch}/token/${addr}?tab=holders&trades_layout=table`;
+}
+function fmtTime(ts){
+  try{ return new Date(ts).toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}); }catch(e){ return ""; }
+}
+
+/* ── API key bar ─────────────────────────────────────────────────────── */
+function keyPresent(){ return !!state.userKey; }
+function maskKey(k){ return k ? k.slice(0,2)+"****"+k.slice(-2) : ""; }
+
+function renderKeyBar(){
+  const fields = $("keyFields"), pill = $("keyState"), hint = $("keyHint");
+  $("apiKey").value = state.userKey;
+  const hasMeta = !!state.meta;
+  if(state.userKey){
+    pill.className = "keystate ok";
+    pill.textContent = "✓ Using your key · " + maskKey(state.userKey);
+    hint.textContent = "Stored in this browser only. You can replace it anytime.";
+    fields.style.display = "flex";
+  } else {
+    pill.className = "keystate warn";
+    pill.textContent = "⚠ Paste your Birdeye API key to run";
+    hint.textContent = hasMeta && state.meta.env_key_present
+      ? "This UI uses BYOK. Paste your own key below instead of the server key."
+      : "Required on this UI. Press Enter or click 'Use this key' after pasting.";
+    fields.style.display = "flex";
+  }
+  updateRunState();
+}
+function updateRunState(){
+  const btn = $("runBtn");
+  if(btn) btn.disabled = !keyPresent();
+}
+function toggleKeyFields(){
+  try{ $("apiKey").focus(); $("apiKey").select(); }catch(e){}
+}
+async function loadMeta(){
+  let m = null;
+  // Vercel / generic serverless backend
+  try{
+    const r = await fetch("/api/meta", {cache:"no-store"});
+    const j = await r.json();
+    if(r.ok && typeof j.serverless !== "undefined") m = j;
+  }catch(e){}
+  // Fallback: local backend — exposes /api/key-info but no /api/meta
+  if(!m){
+    try{
+      const r = await fetch("/api/key-info", {cache:"no-store"});
+      const j = await r.json();
+      m = {serverless:false, env_key_allowed:true, env_key_present:!!j.key_set,
+           env_key_mask:j.mask||"", key_required:!j.key_set, timeout_s:180, cli_ready:true};
+    }catch(e){
+      m = {serverless:false, env_key_allowed:true, env_key_present:false,
+           key_required:true, timeout_s:180, cli_ready:false};
+    }
+  }
+  state.meta = m;
+  $("modePill").textContent = m.serverless
+    ? `deployed · BYOK · max ${m.timeout_s}s/run`
+    : `local · BYOK · max ${m.timeout_s}s/run`;
+  if(m.cli_ready === false) $("modePill").textContent += " · ⚠ CLI missing";
+  renderKeyBar();
+}
+function initKeyBar(){
+  try{ state.userKey = localStorage.getItem(LS_KEY) || ""; }catch(e){ state.userKey = ""; }
+  $("eyeBtn").onclick = ()=>{
+    const inp = $("apiKey");
+    const show = inp.type === "password";
+    inp.type = show ? "text" : "password";
+    $("eyeBtn").textContent = show ? "🙈" : "👁";
+    $("eyeBtn").title = show ? "Hide key" : "Show key";
+  };
+  $("keyUseBtn").onclick = async ()=>{
+    const v = $("apiKey").value.trim();
+    if(!v){ toast("Paste a key first"); return; }
+    state.userKey = v;
+    try{ localStorage.setItem(LS_KEY, v); }catch(e){}
+    // Best effort: also register the key server-side (works on the local hub;
+    // 404 on serverless backends where the per-run key is used instead).
+    try{ fetch("/api/set-key",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({key:v})}); }catch(e){}
+    $("apiKey").type = "password"; $("eyeBtn").textContent = "👁";
+    renderKeyBar(); toast("✓ Key ready for this app");
+  };
+  $("keyClearBtn").onclick = ()=>{
+    state.userKey = "";
+    try{ localStorage.removeItem(LS_KEY); }catch(e){}
+    $("apiKey").value = "";
+    renderKeyBar(); toast("Key cleared");
+  };
+  $("apiKey").addEventListener("keydown", e=>{ if(e.key === "Enter"){ e.preventDefault(); $("keyUseBtn").click(); } });
+  $("apiKey").addEventListener("focus", ()=>{ try{ $("apiKey").select(); }catch(_){} });
+}
+
+/* ── address decoration ──────────────────────────────────────────────── */
+function decorateAddrs(){
+  const root = $("outputArea");
+  root.querySelectorAll(".copy-addr").forEach(el=>{
+    if(el.dataset.decorated) return; el.dataset.decorated = "1";
+    const full = el.dataset.copyAddr || el.textContent.trim();
+    const kind = (el.title||"").toLowerCase().includes("wallet") ? "wallet"
+               : (state.skill.type==="wallet" ? "wallet" : "token");
+    const a = document.createElement("a");
+    a.className = "addr-ext"; a.href = birdeyeUrl(kind, full);
+    a.target = "_blank"; a.rel = "noopener"; a.textContent = "↗";
+    a.title = kind==="wallet" ? "Open on Birdeye Wallet Analyzer" : "Open on Birdeye token page";
+    el.insertAdjacentElement("afterend", a);
+  });
+}
+$("outputArea").addEventListener("click", e=>{
+  const el = e.target.closest(".copy-addr");
+  if(el){ e.preventDefault(); copyText(el.dataset.copyAddr || el.textContent.trim()); }
+});
+
+/* ── workflow drawer (click to show flow + steps) ────────────────────── */
+const FLOW_BY_ID = {
+  token_dd_score:{doc:"token-dd-score-workflow.md",steps:[
+      "Paste the token address and pick the chain (sol · bsc · base · eth · arc · robinhood)",
+      "standard mode — 2 calls (~51 CU): token_overview + token_security. All five pillars are still emitted; pillars without data are renormalized, not zeroed",
+      "advanced mode — all sources (~181 CU): adds holder distribution, holder profile, top holders, token money flow and 24h liquidity OHLC",
+      "Score the five pillars — Security · Holders · Activity · Liquidity · Smart Money — each a weighted mean of ramped sub-scores",
+      "Apply the smooth liquidity-drawdown gate, then read the 0-100 Token Due-Diligence Score and the A+..F rating (HOT → CRITICAL)",
+    ],caps:[
+      "Returns one verdict number rather than a field dump — for when the ask is whether to buy at all",
+      "Composite built from five fixed pillars: Security · Holders · Activity · Liquidity · Smart Money",
+      "Missing sub-signals are dropped and their weight removed, so a pillar reflects measured coverage instead of silently passing — each pillar reports its coverage and a ⚠ coverage_caveat flags thin runs",
+      "A confirmed honeypot is a hard stop: the Security pillar is forced to 0",
+      "Ends with a smooth liquidity-drawdown gate, then maps the score to an A+..F risk rating",
+      "Every deduction names the field behind it, so any low score stays traceable",
+      "Runs on sol · bsc · base · eth · arc · robinhood",
+    ],prompt:"Run a 5-pillar due-diligence score on this token and explain its biggest weaknesses."},
+  kline:{doc:"kline-pattern-workflow.md",steps:[
+      "Paste the token and pick a resolution + lookback window",
+      "Fetch OHLCV — one call, CU scales with the candle count (25-100)",
+      "Classify the candlestick pattern (doji / engulfing / hammer / ...) at the current bar",
+      "Emit the 0-100 pattern score for the chosen candle structure",
+    ],caps:[
+      "One OHLCV call does the whole job — no holder, security or liquidity calls needed",
+      "Classifies the candlestick pattern at the current bar from the chosen resolution",
+      "Returns a 0-100 pattern score rather than a plain pattern name",
+      "Resolution is selectable from 1m to 1d so scalping and swing candles are both covered",
+      "Needs at least 8 candles in the window; CU scales with candle count (25-100)",
+    ],prompt:"Analyse the 15m candles for this token and identify the current pattern with its score."},
+  trending_score:{doc:"skill-22-token-trending-score.md",steps:[
+      "Paste the token address and pick the chain",
+      "classic mode — OHLCV + liquidity + holders + security only: a 6-component momentum score per interval, no overview wallet/volume frames required",
+      "hybrid mode — classic plus the interval-native formula on 1h/4h/24h: 1.0·log10(1+wallets) + 0.5·log10(1+volume) + 0.25·pace_now + 0.25·pace_window + 0.25·tanh(price/25), blended 0.55 native / 0.45 classic (wallets from token_overview; price & candles from OHLCV + overview)",
+      "Score 8 intervals (5m … 24h) with momentum-heavy weights: Vol 30 · Swap 15 · Price 25 · Hold 10 · Sec 10 · Liq 10",
+      "Apply the weighted junk gate (35% security + 50% liquidity + 15% holder), then read the overall 0-100 score",
+    ],caps:[
+      "Momentum decides trending — volume and price carry 55% of the weight; security, liquidity and holder breadth are 10% each",
+      "Security, liquidity and holder breadth also act as continuous gates, not hard cliffs: the three combine into one weighted multiplier (35% / 50% / 15%) so junk is filtered while momentum still ranks",
+      "Security gate = security score / 100; liquidity gate ramps 0 (<USD 1k) → 50% (4k) → 80% (10k) → 100% (50k); holder gate ramps 0 (≤100) → 90% (1k) → 100% (2k)",
+      "Liquidity gate uses effective depth — min(liquidity, exit liquidity) where reported; exit liquidity is used on Solana",
+      "A confirmed honeypot is the only hard stop (near-zero gate)",
+      "Two models: classic (OHLCV-only, works on any token) and hybrid (adds the wallets / volume / pace native formula on 1h/4h/24h)",
+      "Scores 8 intervals — 5m · 15m · 30m · 1h · 4h · 6h · 12h · 24h — so short pumps and sustained trends are separated",
+      "Raises ⚠ pipeline_gap when required upstream data is missing instead of silently degrading",
+    ],prompt:"Score how strongly this token is trending right now and tell me whether the move is short-lived or sustained."},
+  junk:{doc:null,steps:[
+      "Paste one or more token addresses (space, comma or newline separated)",
+      "unsupervised — LR16 logistic model on market cap, liquidity, volume, trades, traders and top-holder concentration",
+      "function — tuned heuristic, no ML weights: same inputs, explicit rules (use when you want an explainable verdict)",
+      "supervised — GBM model trained on labelled junk outcomes",
+      "Optionally include holder distribution (+30 CU per token) for the concentration input",
+      "Read the 0-100 junk score and verdict per token",
+    ],caps:[
+      "Batch-scores many tokens in one run and returns a per-token verdict, not a single blended number",
+      "Three selectable models — unsupervised (LR16), function (tuned heuristic) and supervised (GBM) — so an explainable rule-based verdict can be compared against the learned ones",
+      "Inputs are cheap quality signals only: market cap, liquidity, volume, trades, traders and top-holder concentration",
+      "Holder distribution is opt-in (+30 CU/token) and only fetched when the concentration input is wanted",
+      "Runs at ~21 CU/token, so screening a whole list stays cheap",
+    ],prompt:"Tell me which of these tokens are junk and compare the unsupervised, function and supervised model outputs."},
+  wallet_score:{doc:"wallet-score-workflow.md",steps:[
+      "Paste the wallet address and pick a duration (24h · 7d · 30d · 90d · all)",
+      "Fetch PnL summary (30 CU), then per-token rug% (10 CU), First-Tx provenance (40 CU) and Portfolio (30 CU)",
+      "Hard filters short-circuit low-quality wallets (tx >= 20, volume >= USD 5k, rug% <= 50%) — an early failure costs 30 CU only",
+      "Compute the four components — Profitability P40 · Consistency C25 · Quality Q20 · Activity A15",
+      "Optionally include wallet style at 0 extra CU (reuses fetched data)",
+    ],caps:[
+      "Two verdicts in one run: a 0-100 alpha score and a copy-tradeability score",
+      "Four weighted components — Profitability (P40), Consistency (C25), Quality (Q20), Activity (A15)",
+      "Hard filters (tx >= 20, volume >= USD 5k, rug% <= 50%) short-circuit obviously low-quality wallets before the full spend",
+      "First-Tx funding provenance is resolved and cached permanently, so repeat runs cost 0 CU for that block",
+      "PnL method is selectable — weighted-average cost (wac) or cashflow difference (net_cash)",
+      "Every fetch block can be skipped (--skip-rug / --skip-portfolio / --skip-first-tx) to trim CU",
+    ],prompt:"Score this wallet's alpha and copy-tradeability and tell me whether it is worth copying."},
+  wallet_style:{doc:"wallet-style-workflow.md",steps:[
+      "Paste the wallet and pick a duration (7d · 30d)",
+      "Fetch PnL summary (30 CU), details (30 CU) and the tx list (~30 CU)",
+      "Place the wallet on the 20-cell frequency × P&L grid",
+      "Attach the speed subtitle and risk badges (scaling, gas) from the trade rhythm",
+    ],caps:[
+      "Places the wallet on a 20-cell frequency × P&L grid rather than returning a raw trade list",
+      "Adds a speed subtitle (scalp / swing / hold) derived from real trade pacing",
+      "Attaches risk badges — scaling in/out and gas behaviour — from the tx list",
+      "Reuses the cached first-funded lookup, so wallet age costs 0 CU when already known",
+      "The tx-list block can be skipped (−30 CU) when only the grid position is needed",
+    ],prompt:"What style does this wallet trade in — scalper, swing or holder — and how risky is its pacing?"},
+};
+function flowFor(id){ return FLOW_BY_ID[id] || {steps:["Open a skill","Fill the parameters","▶ Run","Read the result"],caps:[],prompt:"Explain what this skill does and how to use it.",doc:null}; }
+function openFlow(){
+  const s = state.skill, f = flowFor(s.id);
+  $("fdTitle").textContent = `${s.icon} ${s.name} · Workflow`;
+  const steps = f.steps.map((t,i)=>`<div class="flowStep"><div class="n">${i+1}</div><div class="txt">${esc(t)}</div></div>`).join("");
+  const doc = f.doc ? `<a class="docLink" href="/docs/${encodeURIComponent(f.doc)}" target="_blank" rel="noopener">📄 ${esc(f.doc)}</a>` : "";
+  const caps = (f.caps||[]).length
+    ? `<div class="fd-sec"><h4>Core Capabilities</h4><ul class="fd-caps">${f.caps.map(c=>`<li>${esc(c)}</li>`).join("")}</ul></div>`
+    : "";
+  $("fdBody").innerHTML =
+      caps
+    + `<div class="fd-sec"><h4>Flow · steps</h4>${steps}</div>`
+    + `<div class="fd-sec"><h4>Prompt · click to copy</h4><div class="promptBox" id="fdPrompt">${esc(f.prompt)}</div></div>`
+    + (doc ? `<div class="fd-sec"><h4>Full workflow doc</h4>${doc}</div>` : "");
+  const p = $("fdPrompt"); if(p) p.onclick = ()=>copyText(f.prompt);
+  $("flowDrawer").classList.add("open");
+  $("fdScrim").classList.add("show");
+  $("flowDrawer").setAttribute("aria-hidden","false");
+}
+function closeFlow(){
+  const d = $("flowDrawer"); if(!d) return;
+  d.classList.remove("open"); d.setAttribute("aria-hidden","true");
+  $("fdScrim").classList.remove("show");
+}
+(function buildFlowDrawer(){
+  const scrim = document.createElement("div"); scrim.id="fdScrim"; scrim.className="fd-scrim";
+  const dr = document.createElement("aside"); dr.id="flowDrawer"; dr.className="flow-drawer"; dr.setAttribute("aria-hidden","true");
+  dr.innerHTML = `<div class="fd-head"><span class="t" id="fdTitle">🧭 Workflow</span><button id="fdClose" title="Close (Esc)">✕</button></div><div class="fd-body" id="fdBody"></div>`;
+  document.body.appendChild(scrim); document.body.appendChild(dr);
+  scrim.onclick = closeFlow;
+  dr.querySelector("#fdClose").onclick = closeFlow;
+  document.addEventListener("keydown", e=>{ if(e.key==="Escape") closeFlow(); });
+})();
+
+/* ── recent runs (collapsible history, client-side · 0 CU replay) ────── */
+function histAll(){
+  try{ const a = JSON.parse(localStorage.getItem(LS_HIST) || "[]"); return Array.isArray(a) ? a : []; }catch(e){ return []; }
+}
+function histSave(a){
+  try{ localStorage.setItem(LS_HIST, JSON.stringify(a.slice(0, 30))); }catch(e){}
+}
+function histPush(entry){
+  const a = histAll(); a.unshift(entry); histSave(a); renderHistory();
+}
+/* ── 0-CU re-score: swap the Junk-Predict model without touching Birdeye ── */
+const JUNK_MODELS = ["unsupervised","function","supervised"];
+function histJunkModel(r){
+  const argv = r.argv || []; const i = argv.indexOf("--model");
+  return (i >= 0 && argv[i+1]) ? argv[i+1] : "unsupervised";
+}
+function histJunkReady(r){
+  return r.skillId === "junk" && r.formats && String(r.formats.json || "").trim().startsWith("{");
+}
+async function rescoreJunk(i, model){
+  const r = histAll()[i]; if(!r) return;
+  if(!keyPresent()){ toast("Add your Birdeye API key first"); toggleKeyFields(); return; }
+  let payload;
+  try{
+    payload = JSON.parse(String(r.formats.json));
+    if(payload && typeof payload === "object") delete payload.html; // html is re-rendered, keeps payload small
+  }catch(e){ toast("No cached data to re-score"); return; }
+  let b64;
+  try{ b64 = btoa(unescape(encodeURIComponent(JSON.stringify(payload)))); }
+  catch(e){ toast("Cached data too large to re-score"); return; }
+  const argv = [];
+  const src = r.argv || [];
+  for(let k=0;k<src.length;k++){
+    if(src[k]==="--model" || src[k]==="--format"){ k++; continue; }  // drop old model + format
+    if(src[k]==="--score-b64"){ k++; continue; }
+    argv.push(src[k]);
+  }
+  argv.push("--model", model, "--score-b64", b64, "--format", "ui");
+  $("metaArea").innerHTML = "";
+  $("fmtTabs").style.display = "none";
+  $("cmdLineArea").style.display = "block";
+  $("cmdLineArea").innerHTML = `<div class="cmdline"><button class="copybtn" id="copyCmdBtn">📋 copy</button><span>${esc(cmdString(argv))}</span></div>`;
+  const cb = $("copyCmdBtn"); if(cb) cb.onclick = ()=>copyText(cmdString(argv));
+  $("outputArea").innerHTML = `<div class="rendered-box">Re-scoring (${esc(model)}) from cache…</div>`;
+  try{
+    const res = await fetch("/api/run", {
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({script:"birdeye_cli", argv, key: state.userKey}),
+    });
+    const raw = await res.json();
+    if(!res.ok){
+      if(raw.error === "api_key_required"){ $("outputArea").innerHTML = '<div class="rendered-box err">API key required — paste your Birdeye key (🔑 Key).</div>'; renderKeyBar(); }
+      else $("outputArea").innerHTML = `<pre class="out_body err">${esc(raw.error||JSON.stringify(raw))}</pre>`;
+      return;
+    }
+    const j = hydrateResult(normalizeRun(raw));
+    showResult(j);
+    const a = histAll();
+    if(a[i]){ a[i] = Object.assign({}, a[i], {ts:Date.now(), cu:0, exit:j.exit, argv, formats:j.formats}); histSave(a); renderHistory(); }
+    toast(`✓ Re-scored (${model}) from cache · 0 CU`);
+  }catch(e){
+    $("outputArea").innerHTML = `<pre class="out_body err">${esc(String(e))}</pre>`;
+  }
+}
+function renderHistory(){
+  const a = histAll();
+  const n = a.length;
+  $("histCnt").textContent = n;
+  $("histToggleCnt").textContent = n;
+  const el = $("historyList");
+  if(!n){ el.innerHTML = '<div class="hempty">No runs yet. Run a skill — results are cached here for 0-CU replay.</div>'; return; }
+  el.innerHTML = a.map((r,i)=>{
+    const cu = r.cu ? `<span class="hcu">⚡${r.cu} CU</span>` : "";
+    const bad = r.exit ? `<span class="hbad">exit ${r.exit}</span>` : "";
+    const modelSel = histJunkReady(r)
+      ? `<div class="hmodel" title="Re-score from cached data (0 CU · no API call)"><span>model</span><select data-i="${i}">`
+        + JUNK_MODELS.map(m=>`<option value="${m}"${m===histJunkModel(r)?" selected":""}>${m}</option>`).join("")
+        + `</select></div>`
+      : "";
+    return `<div class="hitem" data-i="${i}" title="Click to replay (0 CU)">`
+      + `<div class="hk">${esc(r.icon||"")} ${esc(r.name||r.skillId||"run")}${r.beta?' <span class="betabadge">beta</span>':''}${r.dev?' <span class="devbadge">dev</span>':''}</div>`
+      + `<div class="hd"><span>${fmtTime(r.ts)}</span>${cu}${bad}</div>${modelSel}</div>`;
+  }).join("");
+  el.querySelectorAll(".hitem").forEach(c=>{
+    const sel = c.querySelector("select[data-i]");
+    if(sel){ sel.onclick = e=>e.stopPropagation();
+             sel.onchange = e=>{ e.stopPropagation(); rescoreJunk(parseInt(sel.dataset.i,10), sel.value); }; }
+    c.onclick = ()=>replayRun(parseInt(c.dataset.i,10));
+  });
+}
+function replayRun(i){
+  const r = histAll()[i]; if(!r) return;
+  state.last = {exit:r.exit, cu:r.cu, duration_ms:null, formats:r.formats||{}, text:""};
+  state.fmt = "ui"; setFmt("ui"); paintFormat("ui");
+  $("cmdLineArea").style.display = "none";
+  const meta = [];
+  meta.push('<span class="chip cache-chip">💾 Cached run · Re-render = 0 CU</span>');
+  if(r.cu) meta.push(`<span class="chip cu-chip">Original API cost ⚡${r.cu} CU</span>`);
+  if(r.exit) meta.push(`<span class="chip" style="color:var(--bad)">exit ${r.exit}</span>`);
+  meta.push(`<span class="chip">${fmtTime(r.ts)}</span>`);
+  $("metaArea").innerHTML = meta.join("");
+  $("fmtTabs").style.display = "flex";
+  toast("✓ Replayed from cache (0 CU)");
+}
+function applyHist(open){
+  state.histOpen = open;
+  $("layout").classList.toggle("no-hist", !open);
+  $("histToggle").classList.toggle("off", !open);
+  $("histToggle").title = open ? "Hide history panel" : "Show history panel";
+  $("histToggle").innerHTML = `${open ? 'History &gt;&gt;&gt;' : '&lt;&lt;&lt; History'}<span class="n" id="histToggleCnt">${histAll().length}</span>`;
+  $("histChev").textContent = open ? "▾" : "▸";
+  try{ localStorage.setItem(LS_HISTOPEN, open ? "1" : "0"); }catch(e){}
+}
+function initHistory(){
+  let open = true;
+  try{ const v = localStorage.getItem(LS_HISTOPEN); if(v === "0") open = false; }catch(e){}
+  applyHist(open);
+  $("histHead").onclick = (e)=>{
+    if(e.target.closest("#histClear") || e.target.closest("#histChev")) return;
+    applyHist(!state.histOpen);
+  };
+  $("histToggle").onclick = ()=>applyHist(!state.histOpen);
+  $("histClear").onclick = (e)=>{ e.stopPropagation(); histSave([]); renderHistory(); toast("History cleared"); };
+  renderHistory();
+}
+
+/* ── skill list (group filter + badges) ──────────────────────────────── */
+function renderSkillList(){
+  const el = $("skillList");
+  const chips = Object.keys(GROUPS).map(g=>{
+    const n = g==="all" ? VISIBLE.length : VISIBLE.filter(s=>s.type===g).length;
+    return `<button class="grp ${state.group===g?'active':''}" data-grp="${g}">${GROUPS[g].icon} ${GROUPS[g].label}<span class="cnt">${n}</span></button>`;
+  }).join("");
+  const list = VISIBLE.filter(s=>state.group==="all" || s.type===state.group);
+  const cards = list.map(s=>{
+    const g = GROUPS[s.type] || {label:"?", badge:"?"};
+    const beta = s.beta ? '<span class="betabadge">beta</span>' : "";
+    const dev = s.dev ? '<span class="devbadge">dev</span>' : "";
+    return `<div class="sc ${s.id===state.skill.id?'active':''}" data-id="${s.id}" data-grp="${s.type}" title="${esc(s.desc)}">`
+      + `<div class="gbad" title="${esc(g.label)}">${esc(g.badge)}</div>`
+      + `<div class="ic">${s.icon}</div><div class="body">`
+      + `<div class="nm">${esc(s.name)}${beta}${dev}</div><div class="ds">${esc(s.desc)}</div>`
+      + `</div></div>`;
+  }).join("");
+  el.innerHTML = `<div class="grpbar"><span class="lbl">Group</span>${chips}</div>`
+    + (cards || '<div class="empty">no skills in this group</div>');
+  el.querySelectorAll(".grp").forEach(c=>c.onclick=()=>{
+    state.group = c.dataset.grp; renderSkillList();
+  });
+  el.querySelectorAll(".sc").forEach(c=>c.onclick=()=>{
+    state.skill = VISIBLE.find(x=>x.id===c.dataset.id);
+    renderSkillList(); renderForm(); clearOutput();
+  });
+}
+function clearOutput(){
+  state.last = null; state.fmt = "ui";
+  $("fmtTabs").style.display = "none";
+  $("metaArea").innerHTML = "";
+  $("cmdLineArea").style.display = "none";
+  $("outputArea").innerHTML = "";
+}
+
+/* ── form ────────────────────────────────────────────────────────────── */
+function renderInputControl(i){
+  if(i.type==="select"){
+    return `<select id="inp_${i.k}">${i.opts.map(o=>`<option value="${esc(o)}" ${o===i.def?'selected':''}>${esc(optLabel(o))}</option>`).join("")}</select>`;
+  }
+  if(i.type==="textarea"){
+    return `<textarea id="inp_${i.k}" placeholder="${esc(i.placeholder||i.label)}" spellcheck="false">${esc(i.def||"")}</textarea>`;
+  }
+  return `<input type="text" id="inp_${i.k}" value="${esc(i.def||"")}" placeholder="${esc(i.placeholder||i.label)}" spellcheck="false" autocomplete="off">`;
+}
+function renderField(i, extraCls=""){
+  const cls = ["fld"];
+  if(i.type==="textarea") cls.push("wide");
+  if(["address","wallet","tokens"].includes(i.k)) cls.push("wide","mono");
+  if(extraCls) cls.push(extraCls);
+  return `<div class="${cls.join(" ")}"><label>${esc(i.label)}</label>${renderInputControl(i)}</div>`;
+}
+function renderCompactField(i, extraCls=""){
+  const cls = ["fld"];
+  if(["address","wallet","tokens"].includes(i.k)) cls.push("mono");
+  if(extraCls) cls.push(extraCls);
+  return `<div class="${cls.join(" ")}" data-dd-field="${esc(i.k)}"><label>${esc(i.label)}</label>${renderInputControl(i)}</div>`;
+}
+function renderHeroTags(items, cls="heroTag"){
+  return items.map(t=>`<span class="${cls}">${esc(t)}</span>`).join("");
+}
+/* Toggles are params too — keep them inline with the param row, not in the aside. */
+function renderToggleField(checks){
+  if(!checks.length) return "";
+  return `<div class="fld toggleField"><label>Options</label><div class="chk-row">${
+    checks.map(i=>`<label class="chk"><input type="checkbox" id="inp_${i.k}" ${i.def?'checked':''}/> ${esc(i.label)}</label>`).join("")
+  }</div></div>`;
+}
+function renderHeader(s){
+  return `<div class="hd"><div class="ttgrp"><span class="ttl">${s.icon} ${esc(s.name)}${s.beta?'<span class="betabadge">beta</span>':''}${s.dev?'<span class="devbadge">dev</span>':''}</span><div class="formSub">${esc(s.desc)}</div></div><div class="hdActions"><span class="cmdbadge" id="cmdBadge" title="Click to copy command">📋 ${esc(s.cmd||s.script||'')}</span><button class="flowBtn" id="flowBtn" title="Workflow overview — flow + steps">🧭 Flow</button></div></div>`;
+}
+function renderFooter(s){
+  return `<div class="form-foot"><button class="run" id="runBtn">▶ Run</button><span class="runhint">Enter to run</span><span class="cu-badge">${esc(s.cu)} CU</span></div>`;
+}
+function renderInlineFooter(s, cls="ddInlineActions"){
+  return `<div class="${cls}"><button class="run" id="runBtn">▶ Run</button><span class="runhint">Enter to run</span><span class="cu-badge">${esc(s.cu)} CU</span></div>`;
+}
+function renderWalletLayout(s){
+  const byKey = Object.fromEntries(s.inputs.map(i=>[i.k, i]));
+  const walletField = byKey.wallet || byKey.address;
+  const controls = s.inputs.filter(i=>i.type!=="checkbox" && (!walletField || i.k!==walletField.k));
+  const checks = s.inputs.filter(i=>i.type==="checkbox");
+  const lenses = WALLET_LENSES[s.id] || ["Performance","Behavior","Risk","Context"];
+  return renderHeader(s)
+    + `<div class="walletBrief">${esc(WALLET_BRIEF[s.id] || s.desc)}</div>`
+    + `<div class="skillSplit"><div class="formMain">${walletField ? `<div class="fgrid walletLead">${renderField(walletField,"mainInput")}</div>` : ""}<div class="ddCompactRow walletControls">${controls.map(i=>renderCompactField(i)).join("")}${renderToggleField(checks)}</div></div><div class="formAside"><div class="sideCard"><div class="sideKicker">Output lenses</div><div class="focusList">${renderHeroTags(lenses,"focusChip")}</div></div></div></div>`
+    + renderFooter(s);
+}
+function renderGenericLayout(s){
+  const byKey = Object.fromEntries(s.inputs.filter(i=>i.type!=="checkbox").map(i=>[i.k, i]));
+  // Primary params first (chain → address/wallet → tokens), then the rest.
+  const lead = ["chain","address","wallet","tokens"].map(k=>byKey[k]).filter(Boolean);
+  const rest = s.inputs.filter(i=>i.type!=="checkbox" && !lead.includes(i));
+  const checks = s.inputs.filter(i=>i.type==="checkbox");
+  return renderHeader(s)
+    + `<div class="ddCompactRow">${lead.concat(rest).map(i=>renderCompactField(i)).join("")}${renderToggleField(checks)}${renderInlineFooter(s)}</div>`;
+}
+function renderForm(){
+  const s = state.skill;
+  let html = "";
+  let formClass = "form";
+  if(WALLET_SKILL_IDS.has(s.id)){
+    formClass += " walletForm";
+    html = renderWalletLayout(s);
+  } else {
+    html = renderGenericLayout(s);
+  }
+  $("formArea").className = formClass;
+  $("formArea").innerHTML = html;
+  $("runBtn").onclick = runSkill;
+  $("flowBtn").onclick = openFlow;
+  $("cmdBadge").onclick = ()=>copyText(cmdString(buildArgv()));
+  $("formArea").querySelectorAll('input[type=text], textarea').forEach(inp=>{
+    inp.addEventListener('keydown',e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); runSkill(); } });
+    inp.addEventListener("focus", ()=>{ try{ inp.select(); }catch(e){}; });
+  });
+  s.inputs.forEach(i=>{
+    const e2 = $("inp_"+i.k);
+    if(e2) e2.addEventListener("change", updateCmdPreview);
+  });
+  updateCmdPreview();
+  updateRunState();
+}
+
+function buildArgv(){
+  const s = state.skill;
+  const argv = [s.cmd || s.script || s.id];
+  s.inputs.forEach(i=>{
+    const el = $("inp_"+i.k);
+    if(!el) return;
+    if(i.type==="checkbox"){
+      if(s.id==="junk" && i.k==="include_holding_distribution"){
+        if(el.checked) argv.push("--include", "holding_distribution");
+        return;
+      }
+      if(el.checked) argv.push("--"+i.k.replace(/_/g,"-"));
+      return;
+    }
+    const v = el.value.trim();
+    if(!v) return;
+    argv.push("--"+i.k.replace(/_/g,"-"), v);
+  });
+  // Canonical UI formats = ui/json/telegram/plain.
+  // Map them once here to the CLI-specific format names.
+  argv.push("--format", cliFormatForSkill(s, s.fmt || "ui"));
+  return argv;
+}
+function cmdString(argv){
+  return "python3 birdeye_cli.py " + argv.map(a=>/^[A-Za-z0-9_=./:-]+$/.test(a)?a:'"'+a+'"').join(" ");
+}
+function updateCmdPreview(){
+  const area = $("cmdLineArea"); if(!area) return;
+  if($("runBtn") && !state.last){
+    area.style.display = "block";
+    area.innerHTML = `<div class="cmdline"><button class="copybtn" id="copyCmdBtn">📋 copy</button><span>${esc(cmdString(buildArgv()))}</span></div>`;
+    const b = $("copyCmdBtn"); if(b) b.onclick = ()=>copyText(cmdString(buildArgv()));
+  }
+}
+
+/* ── run ─────────────────────────────────────────────────────────────── */
+function normalizeRun(j){
+  if(j && j.formats) return j;                       // serverless rich payload
+  const stdout = (j.stdout || "").replace(/^#RUN_ID[^\n]*\n?/, "");
+  const blob = String(j.stderr || "") + "\n" + String(j.stdout || "");
+  const rid = blob.match(/#RUN_ID\s+(\S+)/);
+  const cu = blob.match(/cu=(\d+)/);
+  const formats = {ui:"", json:"", telegram:"", plain:stdout};
+  const t = stdout.trim();
+  if(t.startsWith("{")){
+    try{
+      const o = JSON.parse(t);
+      const renderedJson = (o && typeof o.rendered_json === "string") ? o.rendered_json.trim() : "";
+      const renderedPlain = (o && typeof o.rendered_plain === "string") ? o.rendered_plain : "";
+      const renderedTelegram = (o && typeof o.rendered_telegram === "string") ? o.rendered_telegram : "";
+      if(renderedJson.startsWith("{") || renderedJson.startsWith("[")) formats.json = renderedJson;
+      else formats.json = t;
+      if(renderedPlain) formats.plain = renderedPlain;
+      if(renderedTelegram) formats.telegram = renderedTelegram;
+      formats.ui = (o && typeof o.html === "string") ? o.html
+                  : `<pre class="out_body">${esc(formats.json || JSON.stringify(o,null,2))}</pre>`;
+    }catch(e){ formats.ui = `<pre class="out_body">${esc(t)}</pre>`; }
+  } else if(t.startsWith("<")){
+    formats.ui = t;
+  } else {
+    formats.ui = `<pre class="out_body">${esc(t)}</pre>`;
+  }
+  return {exit:j.exit, runId: rid?rid[1]:"", cu: cu?parseInt(cu[1],10):null,
+          duration_ms:j.duration_ms, formats, text:stdout, stderr:j.stderr};
+}
+
+function htmlFromBlob(blob){
+  const t = String(blob || "").trim();
+  if(!t) return "";
+  if(t.startsWith("<")) return t;
+  if(t.startsWith("{") || t.startsWith("[")){
+    try{
+      const obj = JSON.parse(t);
+      if(obj && typeof obj === "object"){
+        if(typeof obj.html === "string" && obj.html.trim()) return obj.html;
+        if(typeof obj.rendered_html === "string" && obj.rendered_html.trim()) return obj.rendered_html;
+        if(obj.payload && typeof obj.payload.html === "string" && obj.payload.html.trim()) return obj.payload.html;
+      }
+    }catch(e){}
+  }
+  return "";
+}
+function textFallback(j){
+  const f = j.formats || {};
+  const stderr = String(j.stderr || "").trim();
+  const text = String(j.text || "").trim();
+  const stdout = String(j.stdout || "").trim();
+  if(stderr) return stderr;
+  if(text) return text;
+  if(stdout) return stdout;
+  if(f.plain) return f.plain;
+  if(f.json) return f.json;
+  return "";
+}
+function hydrateResult(j){
+  const f = Object.assign({ui:"", json:"", telegram:"", plain:""}, j.formats || {});
+  if(f.json){
+    try{
+      const obj = JSON.parse(String(f.json));
+      if(obj && typeof obj === "object"){
+        if(typeof obj.rendered_json === "string" && obj.rendered_json.trim()) f.json = obj.rendered_json;
+        if(typeof obj.rendered_plain === "string" && obj.rendered_plain.trim() && !f.plain) f.plain = obj.rendered_plain;
+        if(typeof obj.rendered_telegram === "string" && obj.rendered_telegram.trim() && !f.telegram) f.telegram = obj.rendered_telegram;
+      }
+    }catch(e){}
+  }
+  if(!f.ui){
+    f.ui = htmlFromBlob(j.html) || htmlFromBlob(j.text) || htmlFromBlob(j.stdout) || htmlFromBlob(f.json) || htmlFromBlob(f.plain);
+  }
+  if(!f.json){
+    const cand = [j.text, j.stdout, f.plain].map(v=>String(v || "").trim()).find(v=>v.startsWith("{") || v.startsWith("["));
+    if(cand) f.json = cand;
+  }
+  if(f.json){
+    try{
+      const obj = JSON.parse(String(f.json));
+      if(obj && typeof obj === "object" && (obj.html || obj.rendered_ui || obj.rendered_json)){
+        if(typeof obj.rendered_json === "string" && obj.rendered_json.trim()) f.json = obj.rendered_json;
+        else{
+          delete obj.html;
+          delete obj.rendered_ui;
+          delete obj.rendered_plain;
+          delete obj.rendered_telegram;
+          delete obj.rendered_json;
+          delete obj["rendered_raw-json"];
+          if(obj.payload && typeof obj.payload === "object") delete obj.payload.html;
+          f.json = JSON.stringify(obj, null, 2);
+        }
+      }
+    }catch(e){}
+  }
+  if(!j.text) j.text = textFallback(j);
+  j.formats = f;
+  return j;
+}
+
+async function runSkill(){
+  const btn = $("runBtn");
+  if(!keyPresent()){ toast("Add your Birdeye API key first"); toggleKeyFields(); return; }
+  const argv = buildArgv();
+  btn.disabled = true;
+  $("metaArea").innerHTML = "";
+  $("fmtTabs").style.display = "none";
+  $("cmdLineArea").style.display = "block";
+  $("cmdLineArea").innerHTML = `<div class="cmdline"><button class="copybtn" id="copyCmdBtn">📋 copy</button><span>${esc(cmdString(argv))}</span></div>`;
+  const cb = $("copyCmdBtn"); if(cb) cb.onclick = ()=>copyText(cmdString(argv));
+  $("outputArea").innerHTML = '<div class="rendered-box">Running…</div>';
+  const s = state.skill;
+  try{
+    const res = await fetch("/api/run", {
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({script:"birdeye_cli", argv, key: state.userKey}),
+    });
+    const raw = await res.json();
+    if(!res.ok){
+      if(raw.error === "api_key_required"){ $("outputArea").innerHTML = '<div class="rendered-box err">API key required — paste your Birdeye key (🔑 Key).</div>'; renderKeyBar(); }
+      else $("outputArea").innerHTML = `<pre class="out_body err">${esc(raw.error||JSON.stringify(raw))}</pre>`;
+      return;
+    }
+    const j = hydrateResult(normalizeRun(raw));
+    showResult(j);
+    histPush({id:j.runId||("local-"+Date.now()), ts:Date.now(), skillId:s.id, name:s.name,
+              icon:s.icon, beta:!!s.beta, cu:j.cu, exit:j.exit, argv, formats:j.formats});
+  }catch(e){
+    $("outputArea").innerHTML = `<pre class="out_body err">${esc(String(e))}</pre>`;
+  }finally{
+    btn.disabled = !keyPresent();
+  }
+}
+
+function showResult(j){
+  state.last = hydrateResult(j);
+  const meta = [];
+  meta.push(`<span class="chip">exit ${state.last.exit}</span>`);
+  if(state.last.duration_ms) meta.push(`<span class="chip">${(state.last.duration_ms/1000).toFixed(1)}s</span>`);
+  if(state.last.cu) meta.push(`<span class="chip cu-chip">${state.last.cu} CU</span>`);
+  if(state.last.runId) meta.push(`<span class="chip">${esc(String(state.last.runId).slice(-10))}</span>`);
+  if(state.last.key_source) meta.push(`<span class="chip">key: ${esc(state.last.key_source)}</span>`);
+  if(state.last.format_used) meta.push(`<span class="chip">fmt: ${esc(canonFormatName(state.last.format_used))}</span>`);
+  if(state.last.exit === 124) meta.push('<span class="chip" style="color:var(--bad)">timeout — try a lighter skill</span>');
+  if(state.last.exit && state.last.stderr) meta.push('<span class="chip" style="color:var(--bad)">see error output below</span>');
+  $("metaArea").innerHTML = meta.join("");
+
+  const f = state.last.formats || {};
+  $("fmtTabs").querySelector('[data-fmt="telegram"]').style.display = f.telegram ? "" : "none";
+  $("fmtTabs").querySelector('[data-fmt="json"]').style.display = (f.json || String(state.last.text || "").trim().startsWith("{")) ? "" : "none";
+  $("fmtTabs").querySelector('[data-fmt="plain"]').style.display = f.plain ? "" : "none";
+  $("fmtTabs").style.display = "flex";
+  setFmt("ui");
+  paintFormat("ui");
+}
+
+function setFmt(fmt){
+  state.fmt = fmt;
+  document.querySelectorAll(".fmt-tab").forEach(t=>t.classList.toggle("active", t.dataset.fmt===fmt));
+}
+function paintFormat(fmt){
+  const area = $("outputArea");
+  const actions = $("outputActions");
+  const j = state.last;
+  if(!j){ area.innerHTML = ""; if(actions){ actions.className = "out-actions"; actions.innerHTML = ""; } return; }
+  const f = j.formats || {};
+  if(actions){
+    actions.className = "out-actions";
+    actions.innerHTML = "";
+  }
+  if(fmt === "ui"){
+    if(f.ui){
+      area.innerHTML = `<div class="rendered-box">${f.ui}</div>`;
+    } else {
+      const fallback = textFallback(j) || "No UI output for this skill.";
+      area.innerHTML = `<pre class="out_body ${j.exit ? 'err' : ''}">${esc(fallback)}</pre>`;
+    }
+  } else if(fmt === "plain"){
+    const out = f.plain || textFallback(j) || "No plain output.";
+    area.innerHTML = `<pre class="out_body">${esc(out)}</pre>`;
+    if(actions && out){
+      actions.className = "out-actions show";
+      actions.innerHTML = `<button class="copybtn" id="copyPlainBtn">📋 Copy all plain output</button>`;
+      const b = $("copyPlainBtn"); if(b) b.onclick = ()=>copyText(out);
+    }
+  } else if(fmt === "json"){
+    let out = f.json || "";
+    try{ out = JSON.stringify(JSON.parse(out), null, 2); }catch(e){}
+    area.innerHTML = `<pre class="out_body">${esc(out || "No JSON output.")}</pre>`;
+    if(actions && out){
+      actions.className = "out-actions show";
+      actions.innerHTML = `<button class="copybtn" id="copyJsonBtn">📋 Copy all output JSON</button>`;
+      const b = $("copyJsonBtn"); if(b) b.onclick = ()=>copyText(out);
+    }
+  } else if(fmt === "telegram"){
+    const out = f.telegram || "Telegram format not available for this skill.";
+    area.innerHTML = `<pre class="out_body">${esc(out)}</pre>`;
+    if(actions && out && f.telegram){
+      actions.className = "out-actions show";
+      actions.innerHTML = `<button class="copybtn" id="copyTelegramBtn">📋 Copy all telegram output</button>`;
+      const b = $("copyTelegramBtn"); if(b) b.onclick = ()=>copyText(out);
+    }
+  }
+  if(j.stderr) console.log("stderr:", j.stderr);
+  decorateAddrs();
+}
+document.querySelectorAll(".fmt-tab").forEach(t=>t.onclick=()=>{ setFmt(t.dataset.fmt); paintFormat(t.dataset.fmt); });
+
+/* ── keyboard shortcuts: 1=All 2=Discover 3=Token 4=Wallet ───────────── */
+const GROUP_KEYS = {"1":"all","2":"list","3":"token","4":"wallet"};
+document.addEventListener("keydown", e=>{
+  const tag = (e.target.tagName||"").toLowerCase();
+  if(tag==="input"||tag==="select"||tag==="textarea") return;
+  if(e.metaKey||e.ctrlKey||e.altKey) return;
+  if(GROUP_KEYS[e.key]){ state.group = GROUP_KEYS[e.key]; renderSkillList(); }
+});
+
+/* ── boot ────────────────────────────────────────────────────────────── */
+initKeyBar();
+initHistory();
+renderSkillList();
+renderForm();
+loadMeta();
+</script>
+</body>
+</html>

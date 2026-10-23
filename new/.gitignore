@@ -1,0 +1,24 @@
+# ── Secrets (NEVER commit) ──
+.env
+*.env
+.birdeye.env
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# ── Cache & runtime ──
+.cache/
+*.log
+.DS_Store
+docs-local/
+
+# ── Editor ──
+.vscode/
+.idea/
+*.swp
+.vercel

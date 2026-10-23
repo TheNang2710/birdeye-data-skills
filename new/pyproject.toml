@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "birdeye-skills-cli"
+version = "1.0.0"
+description = "Birdeye on-chain discovery & insight skills — one unified CLI (token DD score, wallet score/style, kline pattern, momentum, junk prediction)."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "nguyenthenang", email = "nguyenthenang89@gmail.com" }]
+keywords = ["birdeye", "crypto", "solana", "token", "defi", "screener", "due-diligence", "cli"]
+dependencies = ["requests>=2.31.0"]
+
+[project.urls]
+Repository = "https://github.com/TheNang2710/birdeye-data-skills"
+
+[project.scripts]
+birdeye-cli = "birdeye_cli:cli"
+
+[tool.setuptools]
+py-modules = ["birdeye_cli", "server"]
+packages = ["modules"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+modules = ["*.json"]
