@@ -672,6 +672,40 @@ def _fmt_pct(v):
     return f"{sign}{float(v):.1f}%"
 
 
+# Token-cell interaction, shared by every skill that renders a token row so the
+# UX never changes: click the address to copy it, click the icon to open the
+# token on the Birdeye web page.
+_COPY_JS = ("if(navigator.clipboard){navigator.clipboard.writeText(this.dataset.copy)}"
+            "var el=this;el.textContent='\u2713 copied';"
+            "setTimeout(function(){el.textContent=el.dataset.label;},900);return false;")
+_WEB_CHAIN = {"sol": "solana", "eth": "ethereum", "arc": "arbitrum"}
+
+
+def _be_token_url(chain, address) -> str:
+    c = _WEB_CHAIN.get(str(chain or ""), str(chain or ""))
+    return f"https://birdeye.so/{c}/token/{address}"
+
+
+def _short_addr(address: str) -> str:
+    return f"{address[:6]}…{address[-4:]}" if len(address) > 10 else address
+
+
+def _copy_addr_btn(address: str, color: str = "#7b8794", size: str = "10.5px") -> str:
+    short = _short_addr(address)
+    return ('<button type="button" data-copy="' + html.escape(address, quote=True) + '"'
+            ' data-label="' + html.escape(short, quote=True) + '"'
+            ' title="Copy address" onclick="' + _COPY_JS + '"'
+            ' style="border:0;background:transparent;padding:0;margin:0;cursor:pointer;'
+            'font-weight:500;font-family:ui-monospace;color:' + color + ';font-size:' + size + '">'
+            + html.escape(short) + '</button>')
+
+
+def _be_token_link(chain, address, inner_html: str, title: str = "Open on Birdeye") -> str:
+    return (f'<a href="{html.escape(_be_token_url(chain, address), quote=True)}" target="_blank" '
+            f'rel="noopener noreferrer" title="{html.escape(title, quote=True)}" '
+            f'style="text-decoration:none;color:inherit">{inner_html}</a>')
+
+
 def _dd_risk_chip(label: str, value: str, tone: str = "neutral") -> str:
     palette = {
         "good": ("rgba(34,197,94,.10)", "#86efac", "rgba(34,197,94,.22)"),
@@ -4667,13 +4701,15 @@ def cmd_trending_list(args):
             subline_parts.append(html.escape(str(r.get("chain") or "").upper()))
         if r.get("platform"):
             subline_parts.append(html.escape(r.get("platform") or ""))
-        if r.get("address"):
-            subline_parts.append(html.escape(str(r.get("address") or "")[:8] + "…" + str(r.get("address") or "")[-4:]))
         subline = " · ".join(subline_parts)
+        addr = str(r.get("address") or "")
+        subline += (" · " if subline else "") + _copy_addr_btn(addr, "#6b7280", "11px")
         body += (
             f'<tr style="border-top:1px solid #1b2130">'
             f'<td style="padding:10px 10px;color:#8a93a6">{i}</td>'
-            f'<td style="padding:10px 10px"><div style="display:flex;gap:10px;align-items:center"><div style="position:relative;width:28px;height:28px;flex:0 0 auto">{token_logo}{chain_logo}</div>'
+            f'<td style="padding:10px 10px"><div style="display:flex;gap:10px;align-items:center">'
+            f'<div style="position:relative;width:28px;height:28px;flex:0 0 auto">'
+            f'{_be_token_link(r.get("chain") or chain, addr, token_logo)}{chain_logo}</div>'
             f'<div><div style="font-weight:800;color:#eef2ff">{html.escape(r.get("symbol") or "?")}</div>'
             f'<div style="font-size:11px;color:#6b7280">{subline}</div></div></div></td>'
             f'<td style="padding:10px 10px;text-align:right;color:#a78bfa">{_fmt_usd(r.get("marketcap"))}</td>'
@@ -5397,28 +5433,39 @@ def cmd_price_surge(args):
                              f"Top-10 holders: {_fmt_pct(t10) if t10 is not None else 'n/a'}"))
         return f'<div style="display:flex;gap:3px;align-items:center">{"".join(badges)}</div>'
 
-    def _row(r: dict) -> str:
+    def _token_cell(r: dict) -> str:
         addr = str(r.get("address") or "")
-        short = f"{addr[:6]}…{addr[-4:]}" if len(addr) > 10 else addr
-        delta = r.get("price_change_interval_pct")
         logo = r.get("logo_uri") or ""
+        if logo:
+            icon_img = (f'<img src="{html.escape(logo)}" alt="" style="width:22px;height:22px;border-radius:50%;'
+                        'background:#161c26;object-fit:cover;display:block" '
+                        'onerror="this.style.visibility=\'hidden\'"/>')
+        else:
+            icon_img = f'<span style="color:{_MUTED};font-size:12px">↗</span>'
+        icon = (f'<span style="flex:0 0 auto;line-height:0">'
+                f'{_be_token_link(chain_norm, addr, icon_img)}</span>')
+        return (
+            f'<td style="{_TD}"><div style="display:flex;align-items:center;gap:8px;min-width:0">'
+            + icon
+            + '<div style="min-width:0"><div style="font-weight:700;color:#f1f5f9;font-size:12.5px">'
+            + html.escape(str(r.get("symbol") or "?"))
+            + '<span style="font-weight:500;font-size:10.5px;color:' + _MUTED + '"> · </span>'
+            + _copy_addr_btn(addr, _MUTED)
+            + '</div><div style="color:' + _MUTED + ';font-size:10px;max-width:210px;overflow:hidden;'
+            'text-overflow:ellipsis">' + html.escape(str(r.get("name") or ""))
+            + (' · ' + html.escape(str(r.get("platform"))) if r.get("platform") else "")
+            + '</div></div></div></td>'
+        )
+
+    def _row(r: dict) -> str:
+        delta = r.get("price_change_interval_pct")
         avg_vol = None
         if r.get("volume_interval") and r.get("trade_interval_count"):
             avg_vol = r["volume_interval"] / r["trade_interval_count"]
         cells = [
             f'<td style="{_TD};color:{_MUTED};font-weight:700;text-align:right">'
             f'{html.escape(str(r.get("rank") or ""))}</td>',
-            f'<td style="{_TD}"><div style="display:flex;align-items:center;gap:8px;min-width:0">'
-            + (f'<img src="{html.escape(logo)}" alt="" style="width:22px;height:22px;border-radius:50%;'
-               'background:#161c26;object-fit:cover;flex:0 0 auto" onerror="this.style.visibility=\'hidden\'"/>'
-               if logo else "")
-            + f'<div style="min-width:0"><div style="font-weight:700;color:#f1f5f9;font-size:12.5px">'
-            f'{html.escape(str(r.get("symbol") or "?"))}'
-            f'<span style="font-weight:500;color:{_MUTED};font-size:10.5px"> · {html.escape(short)}</span></div>'
-            f'<div style="color:{_MUTED};font-size:10px;max-width:210px;overflow:hidden;'
-            f'text-overflow:ellipsis">{html.escape(str(r.get("name") or ""))}'
-            + (f' · {html.escape(str(r.get("platform")))}' if r.get("platform") else "")
-            + '</div></div></div></td>',
+            _token_cell(r),
             _num(_fmt_pct(delta), "good" if (delta or 0) >= 0 else "bad", bold=True),
             _num(_fmt_usd(r.get("price"))),
             _num(_fmt_usd(r.get("market_cap"))),
