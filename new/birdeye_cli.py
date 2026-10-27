@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Birdeye Unified CLI — seven self-contained discovery & insight skills.
+"""Birdeye Unified CLI — eight self-contained discovery & insight skills.
 
 Subcommands:
 
   1. `trending-list`        — Skill #1  · Birdeye hot-token list (selective/classic)
-  2. `token-dd-score`       — Skill #24 · 5-pillar due-diligence score 0-100 + A+..F
-  3. `wallet-score`         — Skill #13 · wallet quality score (P/C/Q/A components)
-  4. `wallet-style`         — Skill #11 · trading-style tagger (freq × P&L grid)
-  5. `kline-pattern`        — Skill #21 · candlestick pattern classifier + 0..100 score
-  6. `token-trending-score` — Skill #22 · 0..100 momentum score per interval
-  7. `junk-predict`         — Skill #23 · ML junk-token classifier (0-100 junk score)
+  2. `price-surge`          — Skill #2  · price-surge screener (standard / advanced hydration)
+  3. `token-dd-score`       — Skill #24 · 5-pillar due-diligence score 0-100 + A+..F
+  4. `wallet-score`         — Skill #13 · wallet quality score (P/C/Q/A components)
+  5. `wallet-style`         — Skill #11 · trading-style tagger (freq × P&L grid)
+  6. `kline-pattern`        — Skill #21 · candlestick pattern classifier + 0..100 score
+  7. `token-trending-score` — Skill #22 · 0..100 momentum score per interval
+  8. `junk-predict`         — Skill #23 · ML junk-token classifier (0-100 junk score)
      `junk-quick-test`      — Skill #23 · same model over random tokens from the v3 list
 
 Helpers: `history-list`, `history-render` (0-CU replay of any cached run).
@@ -76,7 +77,7 @@ _dd_score = _load_external_skill("skills", "token-duediligence", "token-dd-score
 _trending_score = _load_external_skill("skills", "token-trending-score", "trending-score.py")
 
 BIRDEYE_BASE = "https://public-api.birdeye.so"
-CHAINS = {"sol": "solana", "bsc": "bsc", "base": "base", "eth": "ethereum", "arc": "arbitrum", "robinhood": "robinhood"}
+CHAINS = {"sol": "solana", "bsc": "bsc", "base": "base", "eth": "ethereum", "arc": "arbitrum", "robinhood": "robinhood", "multi_chain": "multi_chain", "multichain": "multi_chain"}
 
 CACHE_DIR_DEFAULT = Path(os.environ.get("BIRDEYE_CACHE_DIR") or
                          (Path.home() / ".cache" / "birdeye-skills-runs"))
@@ -423,7 +424,7 @@ def _http_error_text(status: int, body: str) -> str:
 def _be(session: requests.Session, key: str, chain: str, path: str, params: dict | None = None):
     t0 = time.perf_counter()
     r = session.get(BIRDEYE_BASE + path,
-                    headers={"X-API-KEY": key, "x-chain": CHAINS[chain]},
+                    headers={"X-API-KEY": key, "x-chain": CHAINS.get(chain, chain)},
                     params=params or {}, timeout=20)
     ms = int((time.perf_counter() - t0) * 1000)
     if r.status_code != 200:
@@ -865,9 +866,12 @@ def build_parser():
                          help="Skill #1 · Trending List — Birdeye /defi/token_trending (30 CU). "
                               "Pure API passthrough: Birdeye's own hot-token ranking, no local "
                               "scoring (use Skill #22 token-trending-score for the momentum score).")
-    ptl.add_argument("--chain", choices=list(CHAINS.keys()), default="sol")
+    ptl.add_argument("--chain",
+                     choices=["solana", "bsc", "base", "ethereum", "arbitrum", "robinhood", "multi_chain"],
+                     default="solana")
+    ptl.add_argument("--mode", choices=["selective", "classic"], default="selective")
     ptl.add_argument("--sort-by", dest="sort_by", choices=["rank", "volumeUSD", "liquidity"], default="rank")
-    ptl.add_argument("--sort-type", dest="sort_type", choices=["desc", "asc"], default="desc")
+    ptl.add_argument("--sort-type", dest="sort_type", choices=["desc", "asc"], default=None)
     ptl.add_argument("--interval", choices=["5m", "30m", "1h", "4h", "24h"], default="24h")
     ptl.add_argument("--offset", type=int, default=0)
     ptl.add_argument("--limit", type=int, default=20, help="Rows to return, 1..50 (default 20).")
@@ -875,6 +879,62 @@ def build_parser():
                      help="Best-effort client-side filter by launch platform (e.g. pump.fun).")
     ptl.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered"], default="ui")
     ptl.set_defaults(func=cmd_trending_list)
+
+    pps = sub.add_parser("price-surge",
+                         help="Skill #2 · Price Surge Screen — scan a chain for price-surge signals "
+                              "inside a market-cap range, then auto-filter rug-pull, wash-trade and "
+                              "honeypot risk. `standard` = one /defi/v3/token/list call (50 CU); "
+                              "`advanced` = that list plus per-token top-traders and holder health; "
+                              "`--with-security` adds /defi/token_security per hydrated row.")
+    pps.add_argument("--chain",
+                     choices=["solana", "bsc", "base", "ethereum", "arbitrum", "robinhood"],
+                     default="solana")
+    pps.add_argument("--interval",
+                     choices=["1m", "5m", "30m", "1h", "2h", "4h", "8h", "24h", "7d", "30d"],
+                     default="1h", help="Surge window used for the price / volume / trade filters.")
+    pps.add_argument("--mode", choices=["standard", "advanced"], default="standard",
+                     help="standard = token list v3 only (cheapest); advanced = hydrate top traders and "
+                          "holder health for the top rows.")
+    pps.add_argument("--with-security", dest="with_security", action="store_true",
+                     help="advanced: also call /defi/token_security per hydrated row (30 CU/token) to "
+                          "get honeypot / mint / freeze / LP / tax plus top-10%% concentration.")
+    pps.add_argument("--min-price-change", dest="min_price_change", type=float, default=50.0,
+                     help="Surge floor: minimum price change %% over --interval (default 50).")
+    pps.add_argument("--min-market-cap", dest="min_market_cap", type=float, default=None,
+                     help="Lower bound of the market-cap range (server-side).")
+    pps.add_argument("--max-market-cap", dest="max_market_cap", type=float, default=None,
+                     help="Upper bound of the market-cap range (server-side).")
+    pps.add_argument("--min-liquidity", dest="min_liquidity", type=float, default=10000.0)
+    pps.add_argument("--max-liquidity", dest="max_liquidity", type=float, default=None)
+    pps.add_argument("--min-volume", dest="min_volume", type=float, default=5000.0,
+                     help="Minimum traded USD volume over --interval (default 5000).")
+    pps.add_argument("--min-trade-count", dest="min_trade_count", type=int, default=None)
+    pps.add_argument("--min-holders", dest="min_holders", type=int, default=None)
+    pps.add_argument("--platform", default=None, help="Launch platform, e.g. pump.fun.")
+    pps.add_argument("--sort-by", dest="sort_by",
+                     choices=["price_change", "volume", "market_cap", "liquidity", "trade_count", "holder"],
+                     default="price_change")
+    pps.add_argument("--sort-type", dest="sort_type", choices=["desc", "asc"], default="desc")
+    pps.add_argument("--limit", type=int, default=10, help="Rows to return, 1..100 (default 10).")
+    pps.add_argument("--offset", type=int, default=0)
+    pps.add_argument("--top", type=int, default=10,
+                     help="advanced: hydrate at most this many of the top kept rows (CU bound).")
+    pps.add_argument("--no-auto-filter", dest="no_auto_filter", action="store_true",
+                     help="Keep every row and switch off the automatic rug / wash-trade exclusion.")
+    pps.add_argument("--no-holder-health", dest="no_holder_health", action="store_true",
+                     help="advanced: skip the holder-profile call (Solana only, −30 CU/token).")
+    pps.add_argument("--max-liq-mcap-ratio", dest="max_liq_mcap_ratio", type=float, default=0.005,
+                     help="Exclude when liquidity/market_cap falls below this (rug-pull proxy, default 0.005).")
+    pps.add_argument("--max-trades-per-wallet", dest="max_trades_per_wallet", type=float, default=150.0,
+                     help="Exclude when 24h trades / 24h unique wallets exceeds this (wash-trade proxy).")
+    pps.add_argument("--max-dev-hold-pct", dest="max_dev_hold_pct", type=float, default=None,
+                     help="advanced: exclude when dev holds more than this %% of supply.")
+    pps.add_argument("--max-top10-pct", dest="max_top10_pct", type=float, default=None,
+                     help="advanced + --with-security: exclude when the top-10 holders own more than this %%.")
+    pps.add_argument("--min-kol-buyers", dest="min_kol_buyers", type=int, default=None,
+                     help="advanced: exclude when the tagged KOL buyer count is below this.")
+    pps.add_argument("--format", choices=["ui", "json", "telegram", "plain", "raw-json", "rendered"], default="ui")
+    pps.set_defaults(func=cmd_price_surge)
 
     pws = sub.add_parser("wallet-score",
                          help="Skill #13 · Wallet Score (4-component: P40 / C25 / Q20 / A15). "
@@ -4071,7 +4131,8 @@ def cmd_history_render(args):
     if fmt == "ui":
         if kind in ("wallet-alpha-score-v1", "wallet-style-v1", "kline-pattern-v1", "contract-dd-v1",
                     "wallet-analysis-v1", "smart-money-profile-v1", "token-trending-score-v1",
-                    "smart-money-leaderboard-v1", "token-dd-score-v1", "trending-list-v1"):
+                    "smart-money-leaderboard-v1", "token-dd-score-v1", "trending-list-v1",
+                    "price-surge-v1"):
             # Unwrap the pre-rendered JSON string so UI gets html + metrics directly.
             rendered_raw = _cache_text_for_format(cached, "ui") or _cache_text_for_format(cached, "json") or ""
             try:
@@ -4104,7 +4165,7 @@ def cmd_history_render(args):
     if kind in ("wallet-alpha-score-v1", "wallet-style-v1", "kline-pattern-v1", "contract-dd-v1",
                 "wallet-analysis-v1", "smart-money-profile-v1", "token-trending-score-v1",
                 "smart-money-leaderboard-v1", "junk-predict-v1", "junk-quick-test-v1",
-                "token-dd-score-v1", "trending-list-v1") or any(
+                "token-dd-score-v1", "trending-list-v1", "price-surge-v1") or any(
                     cached.get(k) is not None for k in ("rendered_plain", "rendered_telegram", "rendered_json", "rendered_ui")
                 ):
         # Rendered-cache skills store each format as a pre-rendered string field.
@@ -4397,7 +4458,15 @@ def cmd_trending_list(args):
     interval = str(getattr(args, "interval", "24h") or "24h")
     if interval not in _TL_INTERVALS:
         interval = "24h"
-    sort_type = str(getattr(args, "sort_type", "desc") or "desc")
+    mode = str(getattr(args, "mode", "selective") or "selective").lower()
+    if mode not in ("selective", "classic"):
+        mode = "selective"
+    if mode == "classic" and interval not in ("1h", "4h", "24h"):
+        sys.stderr.write("[trending-list] classic mode supports only 1h, 4h, and 24h. "
+                         "Use selective for 5m and 30m.\n")
+        return 2
+    sort_type_raw = getattr(args, "sort_type", None)
+    sort_type = str(sort_type_raw or ("asc" if sort_by == "rank" else "desc"))
     offset = max(0, int(getattr(args, "offset", 0) or 0))
     limit = max(1, min(int(getattr(args, "limit", 20) or 20), 50))
     platform = (getattr(args, "platform", None) or "").strip().lower() or None
@@ -4413,10 +4482,12 @@ def cmd_trending_list(args):
 
     params: dict[str, Any] = {
         "sort_by": sort_by,
+        "mode": mode,
         "sort_type": sort_type,
         "interval": interval,
         "offset": offset,
         "limit": limit,
+        "ui_amount_mode": "scaled",
     }
     try:
         with requests.Session() as s:
@@ -4430,6 +4501,69 @@ def cmd_trending_list(args):
     data = (raw.get("data") if isinstance(raw, dict) else {}) or {}
     tokens = data.get("tokens") or data.get("items") or []
 
+    def _norm_chain(value: Any) -> str:
+        s = str(value or "").strip().lower()
+        aliases = {
+            "sol": "solana",
+            "solana": "solana",
+            "bsc": "bsc",
+            "binance-smart-chain": "bsc",
+            "binance smart chain": "bsc",
+            "base": "base",
+            "eth": "ethereum",
+            "ethereum": "ethereum",
+            "arc": "arbitrum",
+            "arbitrum": "arbitrum",
+            "robinhood": "robinhood",
+            "multi": "multi_chain",
+            "multi_chain": "multi_chain",
+            "multichain": "multi_chain",
+        }
+        return aliases.get(s, s or chain)
+
+    def _svg_uri(svg: str) -> str:
+        payload = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+        return f"data:image/svg+xml;base64,{payload}"
+
+    def _chain_logo_uri(chain_code: str) -> str:
+        code = _norm_chain(chain_code)
+        svgs = {
+            "solana": """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>
+<defs><linearGradient id='g' x1='0' y1='0' x2='1' y2='1'><stop stop-color='#00FFA3'/><stop offset='1' stop-color='#DC1FFF'/></linearGradient></defs>
+<circle cx='32' cy='32' r='32' fill='#0b0f14'/><g fill='url(#g)'>
+<rect x='14' y='16' width='36' height='8' rx='4' transform='skewX(-18)'/>
+<rect x='14' y='28' width='36' height='8' rx='4' transform='skewX(-18)'/>
+<rect x='14' y='40' width='36' height='8' rx='4' transform='skewX(-18)'/></g></svg>""",
+            "bsc": """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>
+<circle cx='32' cy='32' r='32' fill='#0b0f14'/><g fill='#f3ba2f'>
+<path d='M32 12l7 7-7 7-7-7 7-7zm-12 12l7 7-7 7-7-7 7-7zm24 0l7 7-7 7-7-7 7-7zm-12 12l7 7-7 7-7-7 7-7zm0-18l14 14-5 5-9-9-9 9-5-5 14-14zm0 18l9 9-9 9-9-9 5-5 4 4 4-4 5 5z'/></g></svg>""",
+            "base": """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>
+<circle cx='32' cy='32' r='32' fill='#0052ff'/><circle cx='32' cy='32' r='11' fill='#fff'/><path d='M13 32c0-10.5 8.5-19 19-19v9c-5.5 0-10 4.5-10 10z' fill='#fff'/></svg>""",
+            "ethereum": """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>
+<circle cx='32' cy='32' r='32' fill='#0b0f14'/><g fill='none'><path d='M32 9l13 22-13 7-13-7 13-22z' fill='#8a92b2'/><path d='M32 55l13-19-13 7-13-7 13 19z' fill='#62688f'/><path d='M32 38l13-7-13-6v13z' fill='#c1c7e0'/><path d='M32 38V25l-13 6 13 7z' fill='#8a92b2'/></g></svg>""",
+            "arbitrum": """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>
+<circle cx='32' cy='32' r='32' fill='#213147'/><path d='M32 12l18 10v20L32 52 14 42V22l18-10z' fill='#fff'/><path d='M32 17l13 7v15l-13 8-13-8V24l13-7z' fill='#28a0f0'/><path d='M38 22h5v17h-5l-8-13-3 2v11h-5V25h5l8 13 3-2z' fill='#fff'/></svg>""",
+            "robinhood": """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>
+<circle cx='32' cy='32' r='32' fill='#0b0f14'/><path d='M32 12c7 8 10 16 10 23 0 9-5 15-10 17-5-2-10-8-10-17 0-7 3-15 10-23zm-1 9c-3 4-5 8-5 12 0 5 2 9 6 11 4-2 6-6 6-11 0-4-2-8-5-12h-2z' fill='#00c805'/></svg>""",
+            "multi_chain": """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>
+<circle cx='32' cy='32' r='32' fill='#0b0f14'/><g fill='none' stroke='#7c5bff' stroke-width='4' stroke-linecap='round'>
+<circle cx='20' cy='32' r='8' fill='#16203a' stroke='#5b9dff'/><circle cx='44' cy='20' r='8' fill='#1a1326' stroke='#7c5bff'/><circle cx='44' cy='44' r='8' fill='#122018' stroke='#22c55e'/>
+<path d='M27 29l10-6M27 35l10 6M44 28v8'/></g></svg>""",
+        }
+        return _svg_uri(svgs.get(code, svgs["multi_chain"]))
+
+    def _chain_label(chain_code: str) -> str:
+        labels = {
+            "solana": "Solana",
+            "bsc": "BSC",
+            "base": "Base",
+            "ethereum": "Ethereum",
+            "arbitrum": "Arbitrum",
+            "robinhood": "Robinhood",
+            "multi_chain": "Multi Chain",
+        }
+        return labels.get(_norm_chain(chain_code), str(chain_code or "").strip() or chain.upper())
+
     rows: list[dict[str, Any]] = []
     for i, t in enumerate(tokens):
         if not isinstance(t, dict):
@@ -4437,22 +4571,31 @@ def cmd_trending_list(args):
         addr = t.get("address") or t.get("tokenAddress")
         if not addr:
             continue
+        row_chain = _norm_chain(
+            t.get("chain")
+            or t.get("chainName")
+            or t.get("chain_name")
+            or t.get("network")
+            or t.get("networkName")
+            or chain
+        )
         rows.append({
             "rank": _jml._to_float(t.get("rank")) or (offset + i + 1),
             "address": addr,
+            "chain": row_chain,
+            "chain_label": _chain_label(row_chain),
+            "chain_logo_uri": _chain_logo_uri(row_chain),
             "symbol": (t.get("symbol") or "").strip(),
             "name": (t.get("name") or "").strip(),
             "logo_uri": t.get("logoURI") or t.get("logo_uri") or t.get("logo"),
+            "platform": (t.get("platform") or t.get("launchpad") or t.get("source") or "").strip(),
+            "source": (t.get("source") or t.get("platform") or t.get("launchpad") or "").strip(),
             "price": _jml._to_float(t.get("price")),
             "fdv": _jml._to_float(t.get("fdv")),
             "marketcap": _jml._to_float(t.get("marketcap") or t.get("marketCap")),
             "liquidity": _jml._to_float(t.get("liquidity")),
             "volume_interval": _jml._to_float(t.get(f"volume{interval}USD") or t.get(f"v{interval}USD")),
             "price_change_interval_pct": _jml._to_float(t.get(f"price{interval}ChangePercent")),
-            "volume_24h": _jml._to_float(t.get("volume24hUSD") or t.get("v24hUSD")),
-            "price_change_24h_pct": _jml._to_float(t.get("price24hChangePercent")),
-            "trade_24h": _jml._to_float(t.get("trade24h") or t.get("trade24hCount")),
-            "holder": _jml._to_float(t.get("holder") or t.get("holderCount")),
         })
 
     platform_note = ""
@@ -4465,7 +4608,7 @@ def cmd_trending_list(args):
             platform_note = "platform field not returned by this endpoint — filter not applied"
 
     model_label = "Birdeye trending"
-    sort_note = f"Birdeye sort: {sort_by} {sort_type} @ {interval}"
+    sort_note = f"Birdeye sort: {sort_by} {sort_type} @ {interval} · mode {mode}"
 
     # ── plain ──
     plain_lines = [
@@ -4474,13 +4617,15 @@ def cmd_trending_list(args):
     ]
     if platform_note:
         plain_lines.append(f"Note: {platform_note}")
-    header = f"{'#':>3} {'Symbol':<12} {'MCap':>11} {'Liq':>11} {('VOL ' + interval):>12} {'ΔPrice':>9}"
+    header = (f"{'#':>3} {'Symbol':<12} {'MC':>11} {'Price':>11} "
+              f"{f'Vol({interval})':>12} {'Liq':>12} {f'{interval} %':>9}")
     plain_lines.append(header)
     plain_lines.append("-" * len(header))
     for i, r in enumerate(rows, 1):
         line = (f"{i:>3} {(r.get('symbol') or '?')[:12]:<12} "
-                f"{_fmt_usd(r.get('marketcap')):>11} {_fmt_usd(r.get('liquidity')):>11} "
+                f"{_fmt_usd(r.get('marketcap')):>11} {_fmt_usd(r.get('price')):>11} "
                 f"{_fmt_usd(r.get('volume_interval')):>12} "
+                f"{_fmt_usd(r.get('liquidity')):>12} "
                 f"{_fmt_pct(r.get('price_change_interval_pct')):>9}")
         plain_lines.append(line)
     plain_lines.append("")
@@ -4505,41 +4650,58 @@ def cmd_trending_list(args):
 
     body = ""
     for i, r in enumerate(rows, 1):
-        logo = (f'<img src="{html.escape(str(r.get("logo_uri") or ""), quote=True)}" '
-                f'style="width:20px;height:20px;border-radius:6px;object-fit:cover;background:#0f1115" alt=""/>'
-                if r.get("logo_uri") else "")
+        token_logo = (f'<img src="{html.escape(str(r.get("logo_uri") or ""), quote=True)}" '
+                      f'style="width:28px;height:28px;border-radius:999px;object-fit:cover;background:#0f1115" alt=""/>'
+                      if r.get("logo_uri") else
+                      '<div style="width:28px;height:28px;border-radius:999px;background:#111827;display:flex;align-items:center;justify-content:center;color:#94a3b8;font-size:11px;font-weight:700">?</div>')
+        chain_logo = (f'<img src="{html.escape(str(r.get("chain_logo_uri") or ""), quote=True)}" '
+                      f'style="position:absolute;right:-2px;bottom:-2px;width:13px;height:13px;border-radius:999px;'
+                      f'background:#0b0f14;border:1px solid rgba(255,255,255,.18);box-shadow:0 0 0 1px rgba(11,15,20,.9)" '
+                      f'alt="{html.escape(str(r.get("chain_label") or r.get("chain") or ""))}" '
+                      f'title="{html.escape(str(r.get("chain_label") or r.get("chain") or ""))}"/>'
+                      if r.get("chain_logo_uri") else "")
+        subline_parts = []
+        if r.get("name"):
+            subline_parts.append(html.escape((r.get("name") or "")[:28]))
+        if r.get("chain"):
+            subline_parts.append(html.escape(str(r.get("chain") or "").upper()))
+        if r.get("platform"):
+            subline_parts.append(html.escape(r.get("platform") or ""))
+        if r.get("address"):
+            subline_parts.append(html.escape(str(r.get("address") or "")[:8] + "…" + str(r.get("address") or "")[-4:]))
+        subline = " · ".join(subline_parts)
         body += (
-            f'<tr style="border-top:1px solid #1e2430">'
-            f'<td style="padding:6px 8px;color:#64748b">{i}</td>'
-            f'<td style="padding:6px 8px"><div style="display:flex;gap:8px;align-items:center">{logo}'
-            f'<div><div style="font-weight:700;color:#e6e8ef">{html.escape(r.get("symbol") or "?")}</div>'
-            f'<div style="font-size:10px;color:#64748b">{html.escape(r.get("name") or "")[:22]}</div></div></div></td>'
-            f'<td style="padding:6px 8px;text-align:right">{_fmt_usd(r.get("price"))}</td>'
-            f'<td style="padding:6px 8px;text-align:right">{_fmt_usd(r.get("marketcap"))}</td>'
-            f'<td style="padding:6px 8px;text-align:right">{_fmt_usd(r.get("liquidity"))}</td>'
-            f'<td style="padding:6px 8px;text-align:right">{_fmt_usd(r.get("volume_interval"))}</td>'
-            f'<td style="padding:6px 8px;text-align:right;color:{_tl_pct_color(r.get("price_change_interval_pct"))}">'
-            f'{_fmt_pct(r.get("price_change_interval_pct"))}</td>'
+            f'<tr style="border-top:1px solid #1b2130">'
+            f'<td style="padding:10px 10px;color:#8a93a6">{i}</td>'
+            f'<td style="padding:10px 10px"><div style="display:flex;gap:10px;align-items:center"><div style="position:relative;width:28px;height:28px;flex:0 0 auto">{token_logo}{chain_logo}</div>'
+            f'<div><div style="font-weight:800;color:#eef2ff">{html.escape(r.get("symbol") or "?")}</div>'
+            f'<div style="font-size:11px;color:#6b7280">{subline}</div></div></div></td>'
+            f'<td style="padding:10px 10px;text-align:right;color:#a78bfa">{_fmt_usd(r.get("marketcap"))}</td>'
+            f'<td style="padding:10px 10px;text-align:right">{_fmt_usd(r.get("price"))}</td>'
+            f'<td style="padding:10px 10px;text-align:right">{_fmt_usd(r.get("volume_interval"))}</td>'
+            f'<td style="padding:10px 10px;text-align:right">{_fmt_usd(r.get("liquidity"))}</td>'
+            f'<td style="padding:10px 10px;text-align:right;color:{_tl_pct_color(r.get("price_change_interval_pct"))}">{_fmt_pct(r.get("price_change_interval_pct"))}</td>'
             f'</tr>'
         )
     platform_html = (f'<div style="font-size:11px;color:#facc15;margin-bottom:6px">{html.escape(platform_note)}</div>'
                      if platform_note else "")
     html_out = (
-        '<div style="max-width:1000px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">'
-        '<div style="font-size:20px;font-weight:800;color:#e6e8ef;margin-bottom:2px">🔥 Trending List</div>'
-        f'<div style="font-size:12px;color:#8a93a6;margin-bottom:12px">{chain.upper()} · {len(rows)} token(s) · '
-        f'{html.escape(model_label)} · {html.escape(sort_note)}</div>'
+        '<div style="max-width:1600px;margin:0 auto;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif">'
+        '<div style="font-size:24px;font-weight:900;color:#eef2ff;margin-bottom:4px">🔥 Trending Token List</div>'
+        f'<div style="font-size:12px;color:#8a93a6;margin-bottom:14px">{chain.upper()} · {len(rows)} token(s) · '
+        f'{html.escape(model_label)} · {html.escape(sort_note)} · JSON = raw upstream response</div>'
         f'{platform_html}'
-        '<div style="border:1px solid #262b36;border-radius:12px;overflow:hidden">'
-        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#cbd5e1;background:#171a21">'
+        '<div style="border:1px solid #262b36;border-radius:14px;overflow:hidden;background:#0b0f14">'
+        '<div style="overflow:auto">'
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;color:#cbd5e1;background:#0b0f14;min-width:900px">'
         '<thead><tr style="background:#0f1115;font-size:10px;text-transform:uppercase;color:#8a93a6">'
         f'<th style="padding:7px 8px;text-align:left">#</th><th style="padding:7px 8px;text-align:left">Token</th>'
-        f'<th style="padding:7px 8px;text-align:right">Price</th>'
         f'<th style="padding:7px 8px;text-align:right">MCap</th>'
+        f'<th style="padding:7px 8px;text-align:right">Price</th>'
+        f'<th style="padding:7px 8px;text-align:right">{html.escape(f"Vol({interval})")}</th>'
         f'<th style="padding:7px 8px;text-align:right">Liq</th>'
-        f'<th style="padding:7px 8px;text-align:right">Vol {html.escape(interval)}</th>'
-        f'<th style="padding:7px 8px;text-align:right">ΔPrice</th></tr></thead>'
-        f'<tbody>{body}</tbody></table></div>'
+        f'<th style="padding:7px 8px;text-align:right">{html.escape(interval)} %</th></tr></thead>'
+        f'<tbody>{body}</tbody></table></div></div>'
         f'<div style="font-size:10px;color:#475569;margin-top:10px">⚡CU cost: {cu} '
         f'({html.escape(", ".join(breakdown_cu))})</div>'
         '</div>'
@@ -4549,14 +4711,16 @@ def cmd_trending_list(args):
         "schemaVersion": 1, "kind": "trending-list-v1", "run_id": run_id,
         "cu_used": cu, "cu_breakdown": breakdown_cu,
         "params": {
-            "chain": chain, "sort_by": sort_by, "sort_type": sort_type,
+            "chain": chain, "mode": mode, "sort_by": sort_by, "sort_type": sort_type,
             "interval": interval, "offset": offset, "limit": limit,
             "platform": platform, "argv": sys.argv[1:],
         },
         "source": "birdeye", "source_label": model_label,
         "sort_note": sort_note, "platform_note": platform_note or None,
-        "n_tokens": len(rows), "rows": rows, "html": html_out,
+        "n_tokens": len(rows), "rows": rows, "raw_response": raw, "html": html_out,
     }
+
+    raw_json_text = json.dumps(raw, ensure_ascii=False, indent=2 if fmt == "json" else None)
 
     cdir = _cache_dir(getattr(args, "cache_dir", None))
     file_payload = {
@@ -4565,9 +4729,9 @@ def cmd_trending_list(args):
         "params": envelope["params"], "snapshot_time": int(time.time()),
         "rendered_plain": out_plain,
         "rendered_telegram": out_telegram,
-        "rendered_json": json.dumps(envelope, ensure_ascii=False),
+        "rendered_json": json.dumps(raw, ensure_ascii=False, indent=2),
         "rendered_ui": json.dumps(envelope, ensure_ascii=False),
-        "rendered_raw-json": json.dumps(envelope, ensure_ascii=False),
+        "rendered_raw-json": json.dumps(raw, ensure_ascii=False),
         "rendered_rendered": json.dumps(envelope, ensure_ascii=False),
         "out": json.dumps(envelope, ensure_ascii=False),
     }
@@ -4580,7 +4744,861 @@ def cmd_trending_list(args):
     if fmt == "telegram":
         print(out_telegram)
         return 0
-    print(json.dumps(envelope, ensure_ascii=False))
+    print(raw_json_text if fmt == "json" else json.dumps(envelope, ensure_ascii=False))
+    return 0
+
+
+# ── Skill #2 · Price Surge Screen ────────────────────────────────────────────
+_PS_INTERVALS = ["1m", "5m", "30m", "1h", "2h", "4h", "8h", "24h", "7d", "30d"]
+_PS_CU = {
+    "list_v3": 50,
+    "security": 30,
+    "top_traders": 30,
+    "holder_profile": 30,
+}
+_PS_RISK_LABELS = {
+    "stale_market_cap": "stale market cap",
+    "no_liquidity": "no liquidity",
+    "zero_holders_with_trades": "0 holders w/ trades",
+    "thin_liquidity": "thin liquidity",
+    "honeypot_proxy": "no sell side",
+    "wash_trade_proxy": "wash-trade churn",
+    "honeypot": "honeypot",
+    "honeypot_tax": "honeypot tax",
+    "high_transfer_tax": "high transfer tax",
+    "rug_pull_risk": "rug-pull risk",
+    "dev_hold_over_limit": "dev hold > limit",
+    "high_dev_hold": "high dev hold",
+    "top10_over_limit": "top10 > limit",
+    "top10_concentration": "top10 concentration",
+    "low_kol_buyers": "low KOL buyers",
+}
+
+
+def _ps_sort_field(sort_by: str, interval: str) -> str:
+    return {
+        "price_change": f"price_change_{interval}_percent",
+        "volume": f"volume_{interval}_usd",
+        "trade_count": f"trade_{interval}_count",
+        "market_cap": "market_cap",
+        "liquidity": "liquidity",
+        "holder": "holder",
+    }.get(sort_by, f"price_change_{interval}_percent")
+
+
+def _ps_fee_pct(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, dict):
+        for k in ("percent", "pct", "value", "fee", "rate", "amount"):
+            v = value.get(k)
+            if isinstance(v, (int, float)) and not isinstance(v, bool):
+                return float(v)
+    if isinstance(value, str):
+        try:
+            return float(value.strip().rstrip("%"))
+        except Exception:
+            return None
+    return None
+
+
+def _ps_num(obj: dict, *keys: str) -> float | None:
+    for k in keys:
+        v = obj.get(k)
+        if isinstance(v, bool):
+            continue
+        if isinstance(v, (int, float)):
+            return float(v)
+        if isinstance(v, str):
+            try:
+                return float(v.strip())
+            except Exception:
+                continue
+    return None
+
+
+def _ps_map_row(item: dict, interval: str, chain: str) -> dict:
+    """Normalise one `/defi/v3/token/list` row into the price-surge row shape."""
+    price = _ps_num(item, "price")
+    mcap = _ps_num(item, "market_cap")
+    fdv = _ps_num(item, "fdv")
+    liq = _ps_num(item, "liquidity")
+    holder = _ps_num(item, "holder")
+    tc_w = _ps_num(item, f"trade_{interval}_count")
+    tc_24h = _ps_num(item, "trade_24h_count")
+    uw_24h = _ps_num(item, "unique_wallet_24h")
+    buy_24h = _ps_num(item, "buy_24h")
+    sell_24h = _ps_num(item, "sell_24h")
+    ext = item.get("extensions") if isinstance(item.get("extensions"), dict) else {}
+    return {
+        "address": item.get("address"),
+        "symbol": item.get("symbol") or item.get("symbols") or "",
+        "name": item.get("name") or "",
+        "logo_uri": item.get("logo_uri"),
+        "chain": chain,
+        "decimals": item.get("decimals"),
+        "platform": ext.get("platform") or item.get("platform_name") or None,
+        "price": price,
+        "market_cap": mcap,
+        "fdv": fdv,
+        "liquidity": liq,
+        "holder": int(holder) if holder is not None else None,
+        "volume_interval": _ps_num(item, f"volume_{interval}_usd"),
+        "volume_24h": _ps_num(item, "volume_24h_usd"),
+        "price_change_interval_pct": _ps_num(item, f"price_change_{interval}_percent"),
+        "price_change_24h_pct": _ps_num(item, "price_change_24h_percent"),
+        "trade_interval_count": int(tc_w) if tc_w is not None else None,
+        "trade_24h_count": int(tc_24h) if tc_24h is not None else None,
+        "unique_wallet_24h": int(uw_24h) if uw_24h is not None else None,
+        "buy_24h": int(buy_24h) if buy_24h is not None else None,
+        "sell_24h": int(sell_24h) if sell_24h is not None else None,
+        "volume_buy_24h_usd": _ps_num(item, "volume_buy_24h_usd"),
+        "volume_sell_24h_usd": _ps_num(item, "volume_sell_24h_usd"),
+        "liq_mcap_ratio": (liq / mcap) if (liq is not None and mcap and mcap > 0) else None,
+        "trades_per_wallet_24h": (tc_24h / uw_24h) if (tc_24h is not None and uw_24h and uw_24h > 0) else None,
+        "recent_listing_time": item.get("recent_listing_time"),
+        "global_fees_paid": _ps_num(item, "global_fees_paid"),
+        "socials": {k: ext.get(k) for k in ("website", "twitter", "telegram") if ext.get(k)} or None,
+        # advanced-only, filled by hydration
+        "dev_hold_pct": None,
+        "top10_holder_pct": None,
+        "kol_buyer_count": None,
+        "profitable_wallet_ratio": None,
+        "top_traders_n": None,
+        "security": None,
+        "holder_tags": None,
+        "hydrated": False,
+        "excluded": False,
+        "exclude_reason": None,
+        "risk_flags": [],
+    }
+
+
+def _ps_apply_list_filters(row: dict, cfg: dict) -> str | None:
+    """Structural + proxy checks available from the v3 token list alone."""
+    flags: list[str] = row["risk_flags"]
+    mcap = row.get("market_cap") or 0.0
+    fdv = row.get("fdv") or 0.0
+    if fdv and mcap and mcap > fdv * 1.01:
+        flags.append("stale_market_cap")
+        return "stale_market_cap"
+    liq = row.get("liquidity")
+    if liq is not None and liq <= 0:
+        flags.append("no_liquidity")
+        return "no_liquidity"
+    if row.get("holder") == 0 and (row.get("trade_interval_count") or 0) > 0:
+        flags.append("zero_holders_with_trades")
+        return "zero_holders_with_trades"
+    ratio = row.get("liq_mcap_ratio")
+    thr = cfg.get("max_liq_mcap_ratio")
+    if ratio is not None and thr is not None and mcap > 0 and ratio < thr:
+        flags.append("thin_liquidity")
+        return "thin_liquidity"
+    buy_24h, sell_24h = row.get("buy_24h"), row.get("sell_24h")
+    if buy_24h is not None and sell_24h is not None and buy_24h >= 20 and sell_24h == 0:
+        flags.append("honeypot_proxy")
+        return "honeypot_proxy"
+    tpw = row.get("trades_per_wallet_24h")
+    tmax = cfg.get("max_trades_per_wallet")
+    if tpw is not None and tmax is not None and tpw > tmax:
+        flags.append("wash_trade_proxy")
+        return "wash_trade_proxy"
+    return None
+
+
+def _ps_apply_advanced_filters(row: dict, cfg: dict) -> str | None:
+    """Holder-health checks that require the advanced hydration pass."""
+    flags: list[str] = row["risk_flags"]
+    dev = row.get("dev_hold_pct")
+    if dev is not None:
+        limit = cfg.get("max_dev_hold_pct")
+        if limit is not None and dev > limit:
+            flags.append("dev_hold_over_limit")
+            return "dev_hold_over_limit"
+        if dev >= 10:
+            flags.append("high_dev_hold")
+    t10 = row.get("top10_holder_pct")
+    if t10 is not None:
+        limit = cfg.get("max_top10_pct")
+        if limit is not None and t10 > limit:
+            flags.append("top10_over_limit")
+            return "top10_over_limit"
+        if t10 >= 50:
+            flags.append("top10_concentration")
+    min_kol = cfg.get("min_kol_buyers")
+    kol = row.get("kol_buyer_count")
+    if min_kol is not None and kol is not None and kol < min_kol:
+        flags.append("low_kol_buyers")
+        return "low_kol_buyers"
+    return None
+
+
+def _ps_hydrate_security(session, key: str, chain: str, addr: str, row: dict) -> bool:
+    """Token security for one token (all chains).
+
+    Also the source of top-10 holder concentration, which Birdeye exposes on
+    every chain — so no separate holder-distribution call is needed.
+    """
+    try:
+        raw, _ = _be(session, key, chain, "/defi/token_security", {"address": addr})
+    except RuntimeError:
+        return False
+    d = raw.get("data") if isinstance(raw, dict) else None
+    if not isinstance(d, dict) or not d:
+        return False
+    cp = _ps_num(d, "creatorPercentage", "creatorPercent")
+    t10 = _ps_num(d, "top10HolderPercent", "top10UserPercent")
+    owner = d.get("ownerAddress")
+    freeze = d.get("freezeAuthority")
+    mutable = d.get("mutableMetadata")
+    lp_locked = d.get("lpLocked")
+    honeypot = d.get("isHoneypot")
+    metadata_immutable = (mutable is False) if isinstance(mutable, bool) else None
+    # Solana (Token-2022) reports the transfer fee under `transferFeeData`.
+    fee = _ps_fee_pct(d.get("transferFee"))
+    if fee is None:
+        fee = _ps_fee_pct(d.get("transferFeeData"))
+    row["security"] = {
+        "honeypot": bool(honeypot) if isinstance(honeypot, bool) else None,
+        "mint_renounced": (owner is None) if "ownerAddress" in d else None,
+        "freeze_renounced": (freeze is None) if "freezeAuthority" in d else None,
+        "metadata_immutable": metadata_immutable,
+        "open_source_status": ("immutable" if metadata_immutable else "mutable")
+        if metadata_immutable is not None else ("immutable" if mutable is None else None),
+        "lp_locked": bool(lp_locked) if isinstance(lp_locked, bool) else None,
+        "transfer_fee_pct": fee,
+    }
+    if t10 is not None:
+        row["top10_holder_pct"] = round(t10 * 100 if t10 <= 1 else t10, 4)
+    if cp is not None and row.get("dev_hold_pct") is None:
+        row["dev_hold_pct"] = round(cp * 100 if cp <= 1 else cp, 4)
+    return True
+
+
+def _ps_hydrate_top_traders(session, key: str, chain: str, addr: str, row: dict) -> bool:
+    """Top traders for one token.
+
+    Live shape: rows at ``data.items[]``; wallet address under ``owner`` (not
+    ``wallet``); ``sort_by`` must be snake_case (``volume_usd``).
+    """
+    try:
+        raw, _ = _be(session, key, chain, "/defi/v2/tokens/top_traders",
+                     {"address": addr, "time_frame": "24h", "sort_by": "volume_usd",
+                      "offset": 0, "limit": 10})
+    except RuntimeError:
+        return False
+    d = raw.get("data") if isinstance(raw, dict) else None
+    if isinstance(d, dict):
+        rows = d.get("items") or d.get("rows") or []
+    elif isinstance(d, list):
+        rows = d
+    else:
+        return False
+    if not isinstance(rows, list):
+        return False
+    wallets: list[str] = []
+    kol = 0
+    profitable = 0
+    for t in rows:
+        if not isinstance(t, dict):
+            continue
+        w = t.get("owner") or t.get("wallet")
+        if w:
+            wallets.append(str(w))
+        tags = t.get("tags")
+        if isinstance(tags, list) and tags:
+            low = {str(x).lower() for x in tags}
+            if "kol" in low or "kol_wallet" in low:
+                kol += 1
+        pnl = t.get("realizedPnl", t.get("totalPnl"))
+        win, lose = t.get("winCount"), t.get("loseCount")
+        if isinstance(pnl, (int, float)) and not isinstance(pnl, bool) and pnl > 0:
+            profitable += 1
+        elif isinstance(win, (int, float)) and isinstance(lose, (int, float)) and win >= lose:
+            profitable += 1
+    row["top_traders_n"] = len(rows)
+    row["top_trader_wallets"] = wallets
+    # Birdeye's tag vocabulary has no KOL tag — keep the counter best-effort and
+    # surface "n/a" (None) when nothing matched rather than a misleading 0.
+    row["kol_buyer_count"] = kol if kol else None
+    row["profitable_wallet_ratio"] = round(profitable / len(rows) * 100, 2) if rows else None
+    return True
+
+
+def _ps_hydrate_holder_profile(session, key: str, addr: str, row: dict) -> bool:
+    """Holder profile tags (Solana only).
+
+    Live shape: ``data.tags`` is a LIST of ``{tag, holder_count, percent_of_supply,
+    avg_buy_price, pnl, ...}`` — not a dict keyed by tag name.
+    """
+    try:
+        raw, _ = _be(session, key, "solana", "/token/v1/holder-profile",
+                     {"token_address": addr, "include_zero_balance": "false"})
+    except RuntimeError:
+        return False
+    d = raw.get("data") if isinstance(raw, dict) else None
+    if not isinstance(d, dict):
+        return False
+    tags = d.get("tags")
+    out: dict[str, dict] = {}
+    if isinstance(tags, list):
+        for t in tags:
+            if not isinstance(t, dict):
+                continue
+            name = str(t.get("tag") or "").lower()
+            if not name:
+                continue
+            out[name] = {
+                "percent_of_supply": _ps_num(t, "percent_of_supply"),
+                "holder_count": t.get("holder_count"),
+                "avg_buy_price": _ps_num(t, "avg_buy_price"),
+                "pnl_usd": _ps_num(t, "pnl", "pnl_usd"),
+            }
+    elif isinstance(tags, dict):
+        for name, t in tags.items():
+            if isinstance(t, dict):
+                out[str(name).lower()] = {
+                    "percent_of_supply": _ps_num(t, "percent_of_supply"),
+                    "holder_count": t.get("holder_count"),
+                    "avg_buy_price": _ps_num(t, "avg_buy_price"),
+                    "pnl_usd": _ps_num(t, "pnl", "pnl_usd"),
+                }
+    if not out:
+        return False
+    row["holder_tags"] = out
+    if row.get("dev_hold_pct") is None:
+        dev_pct = (out.get("dev") or {}).get("percent_of_supply")
+        if isinstance(dev_pct, (int, float)):
+            row["dev_hold_pct"] = round(float(dev_pct), 4)
+    return True
+
+
+def _ps_fmt_int(v) -> str:
+    if v is None:
+        return "—"
+    try:
+        n = float(v)
+    except Exception:
+        return str(v)
+    if abs(n) >= 1_000_000_000:
+        return f"{n/1_000_000_000:.2f}B"
+    if abs(n) >= 1_000_000:
+        return f"{n/1_000_000:.2f}M"
+    if abs(n) >= 1_000:
+        return f"{n/1_000:.1f}K"
+    return f"{int(n)}" if n == int(n) else f"{n:.2f}"
+
+
+def _ps_ratio(v) -> str:
+    return f"{float(v):.4f}" if isinstance(v, (int, float)) else "—"
+
+
+def _ps_kv(label: str, value: str, tone: str = "neutral") -> str:
+    fg = {"good": "#86efac", "warn": "#fde68a", "bad": "#fca5a5"}.get(tone, "#e2e8f0")
+    return (f'<div style="background:#0b0f14;border:1px solid #1b222d;border-radius:9px;padding:5px 8px">'
+            f'<div style="font-size:9.5px;color:#7b8794;text-transform:uppercase;letter-spacing:.05em">'
+            f'{html.escape(label)}</div>'
+            f'<div style="font-size:13px;font-weight:700;color:{fg}">{html.escape(value)}</div></div>')
+
+
+def cmd_price_surge(args):
+    """Skill #2 — Price Surge Screen.
+
+    Two cost tiers over the same surge feed:
+
+      * ``min``      — a single ``/defi/v3/token/list`` call (50 CU). The market-cap
+                       range and the surge / liquidity / volume floors are applied
+                       server-side, then structural rug + wash proxies are applied
+                       locally.
+      * ``advanced`` — the same list plus per-token hydration: ``/defi/token_security``,
+                       ``/defi/v2/tokens/top_traders``, ``/smart-money/v1/token/list``
+                       and (Solana only) ``/holder/v1/distribution`` +
+                       ``/token/v1/holder-profile``.
+
+    High-risk rows (rug-pull proxies, wash-trade churn, honeypots) are excluded
+    automatically; pass ``--no-auto-filter`` to keep them.
+    """
+    chain = str(getattr(args, "chain", "solana") or "solana")
+    chain_norm = CHAINS.get(chain, chain)
+    is_solana = chain_norm == "solana"
+    interval = str(getattr(args, "interval", "1h") or "1h")
+    if interval not in _PS_INTERVALS:
+        interval = "1h"
+    mode = str(getattr(args, "mode", "standard") or "standard").lower()
+    if mode not in ("standard", "advanced"):
+        mode = "standard"
+    sort_by = str(getattr(args, "sort_by", "price_change") or "price_change")
+    sort_type = str(getattr(args, "sort_type", "desc") or "desc")
+    limit = max(1, min(int(getattr(args, "limit", 10) or 10), 100))
+    offset = max(0, int(getattr(args, "offset", 0) or 0))
+    top = max(0, int(getattr(args, "top", 10) or 0))
+    auto_filter = not bool(getattr(args, "no_auto_filter", False))
+    holder_health = not bool(getattr(args, "no_holder_health", False))
+    with_security = bool(getattr(args, "with_security", False)) and mode == "advanced"
+    fmt = _canonical_format(getattr(args, "format", None))
+    key = _load_key()
+    if not key:
+        sys.stderr.write("[price-surge] missing BIRDEYE_API_KEY.\n")
+        return 2
+
+    cfg = {
+        "max_liq_mcap_ratio": getattr(args, "max_liq_mcap_ratio", 0.005),
+        "max_trades_per_wallet": getattr(args, "max_trades_per_wallet", 150.0),
+        "max_dev_hold_pct": getattr(args, "max_dev_hold_pct", None),
+        "max_top10_pct": getattr(args, "max_top10_pct", None),
+        "min_kol_buyers": getattr(args, "min_kol_buyers", None),
+    }
+    min_mc = getattr(args, "min_market_cap", None)
+    max_mc = getattr(args, "max_market_cap", None)
+
+    cu = 0
+    breakdown_cu: list[str] = []
+    run_id = f"psurge_{chain_norm}_{interval}_{int(time.time())}"
+
+    params: dict[str, Any] = {
+        "sort_by": _ps_sort_field(sort_by, interval),
+        "sort_type": sort_type,
+        "offset": offset,
+        "limit": limit,
+        "ui_amount_mode": "scaled",
+    }
+    for pkey, pval in (
+        (f"min_price_change_{interval}_percent", getattr(args, "min_price_change", 50.0)),
+        ("min_market_cap", min_mc),
+        ("max_market_cap", max_mc),
+        ("min_liquidity", getattr(args, "min_liquidity", 10000.0)),
+        ("max_liquidity", getattr(args, "max_liquidity", None)),
+        (f"min_volume_{interval}_usd", getattr(args, "min_volume", 5000.0)),
+        (f"min_trade_{interval}_count", getattr(args, "min_trade_count", None)),
+        ("min_holder", getattr(args, "min_holders", None)),
+    ):
+        if pval is not None:
+            params[pkey] = pval
+    platform = (getattr(args, "platform", None) or "").strip() or None
+    if platform:
+        params["platform_name"] = platform
+
+    n_hydrated = 0
+    hydration_note = None
+    try:
+        with requests.Session() as session:
+            raw, _ms = _be(session, key, chain_norm, "/defi/v3/token/list", params)
+            cu += _PS_CU["list_v3"]
+            breakdown_cu.append(f"token_list_v3={_PS_CU['list_v3']}")
+            data = raw.get("data") if isinstance(raw, dict) else None
+            items = (data.get("items") if isinstance(data, dict) else None) or []
+
+            rows = [_ps_map_row(it, interval, chain_norm) for it in items if isinstance(it, dict)]
+
+            # Pass 1 — everything the token list alone can already tell us.
+            for row in rows:
+                if auto_filter:
+                    reason = _ps_apply_list_filters(row, cfg)
+                    if reason:
+                        row["excluded"] = True
+                        row["exclude_reason"] = reason
+
+            # Pass 2 — hydrate the top kept rows (CU bounded by --top).
+            if mode == "advanced" and top > 0:
+                counters = {"security": 0, "top_traders": 0, "holder_profile": 0}
+                targets = [r for r in rows if not r["excluded"]][:top]
+                if not is_solana:
+                    hydration_note = "holder profile is Solana-only"
+                for row in targets:
+                    addr = str(row.get("address") or "")
+                    if not addr:
+                        continue
+                    if with_security and _ps_hydrate_security(session, key, chain_norm, addr, row):
+                        counters["security"] += 1
+                    if _ps_hydrate_top_traders(session, key, chain_norm, addr, row):
+                        counters["top_traders"] += 1
+                    if is_solana and holder_health:
+                        if _ps_hydrate_holder_profile(session, key, addr, row):
+                            counters["holder_profile"] += 1
+                    row["hydrated"] = True
+                    n_hydrated += 1
+                    row.pop("top_trader_wallets", None)
+                    if auto_filter:
+                        reason = _ps_apply_advanced_filters(row, cfg)
+                        if reason:
+                            row["excluded"] = True
+                            row["exclude_reason"] = reason
+                for label in ("security", "top_traders", "holder_profile"):
+                    n = counters[label]
+                    if n:
+                        cu += _PS_CU[label] * n
+                        breakdown_cu.append(f"{label}={_PS_CU[label]}x{n}")
+            elif mode == "advanced" and top == 0:
+                hydration_note = "--top 0: advanced mode ran without hydrating any row"
+    except RuntimeError as e:
+        sys.stderr.write(f"[price-surge] {e}\n")
+        return 1
+
+    kept = [r for r in rows if not r["excluded"]]
+    dropped = [r for r in rows if r["excluded"]]
+    for i, r in enumerate(kept, 1):
+        r["rank"] = i
+
+    chain_label = {
+        "solana": "Solana", "bsc": "BSC", "base": "Base",
+        "ethereum": "Ethereum", "arbitrum": "Arbitrum", "robinhood": "Robinhood",
+    }.get(chain_norm, chain_norm)
+    mcap_range = " · ".join(
+        [f"≥{_fmt_usd(min_mc)}" if min_mc is not None else "", f"≤{_fmt_usd(max_mc)}" if max_mc is not None else ""]
+    ).strip(" ·") or "no bound"
+    mode_label = "advanced+security" if with_security else mode
+    sort_note = f"{params['sort_by']} {sort_type}"
+
+    # ── plain ────────────────────────────────────────────────────────────────
+    header_cells = [("#", 3), ("SYMBOL", 12), ("PRICE", 12), (f"Δ{interval}%", 9),
+                    ("MCAP", 10), ("LIQ", 10), (f"VOL({interval})", 12), ("TRADES", 9),
+                    ("HLDRS", 8), ("KOL", 5), ("DEV%", 7), ("T10%", 7), ("FLAGS", 18)]
+    lines = [
+        f"💹 Price Surge Screen · {chain_label} · {interval} · mode={mode_label} · auto-filter="
+        f"{'on' if auto_filter else 'off'}",
+        f"   mcap range: {mcap_range} · liquidity ≥ {_fmt_usd(params.get('min_liquidity'))} · "
+        f"vol({interval}) ≥ {_fmt_usd(params.get(f'min_volume_{interval}_usd'))} · "
+        f"surge ≥ {params.get(f'min_price_change_{interval}_percent')}% · sort {sort_note}",
+        "",
+        " ".join(_pad_cell(c, w) for c, w in header_cells),
+        "-" * (sum(w for _, w in header_cells) + len(header_cells) - 1),
+    ]
+    for r in kept:
+        addr = str(r.get("address") or "")
+        short = f"{addr[:4]}…{addr[-4:]}" if len(addr) > 8 else addr
+        flags = ",".join(_PS_RISK_LABELS.get(f, f) for f in r["risk_flags"]) or "-"
+        lines.append(" ".join([
+            _pad_cell(str(r.get("rank") or ""), 3, "right"),
+            _pad_cell(str(r.get("symbol") or short)[:12], 12),
+            _pad_cell(_fmt_usd(r.get("price")), 12, "right"),
+            _pad_cell(_fmt_pct(r.get("price_change_interval_pct")), 9, "right"),
+            _pad_cell(_fmt_usd(r.get("market_cap")), 10, "right"),
+            _pad_cell(_fmt_usd(r.get("liquidity")), 10, "right"),
+            _pad_cell(_fmt_usd(r.get("volume_interval")), 12, "right"),
+            _pad_cell(_ps_fmt_int(r.get("trade_interval_count")), 9, "right"),
+            _pad_cell(_ps_fmt_int(r.get("holder")), 8, "right"),
+            _pad_cell(_ps_fmt_int(r.get("kol_buyer_count")), 5, "right"),
+            _pad_cell(f"{r['dev_hold_pct']:.1f}" if r.get("dev_hold_pct") is not None else "—", 7, "right"),
+            _pad_cell(f"{r['top10_holder_pct']:.1f}" if r.get("top10_holder_pct") is not None else "—", 7, "right"),
+            _pad_cell(flags[:18], 18),
+        ]))
+    if not kept:
+        lines.append("(no token survived the screen — loosen --min-price-change / the mcap range)")
+    if dropped:
+        lines += ["", f"⛔ filtered out ({len(dropped)}):"]
+        for r in dropped:
+            lines.append(f"   - {str(r.get('symbol') or r.get('address'))[:14]:<14} "
+                         f"{r['exclude_reason']:<24} {str(r.get('address'))[:6]}…")
+    lines += ["", f"⚡CU cost: {cu} ({', '.join(breakdown_cu)}) · "
+                  f"scanned {len(rows)} · kept {len(kept)} · filtered {len(dropped)} · hydrated {n_hydrated}"]
+    if hydration_note:
+        lines.append(f"   note: {hydration_note}")
+    out_plain = "\n".join(lines)
+
+    # ── telegram ─────────────────────────────────────────────────────────────
+    tlines = [
+        "💹 *Price Surge Screen*",
+        f"`{chain_label}` · `{interval}` · mode `{mode_label}` · auto-filter `{'on' if auto_filter else 'off'}`",
+        f"mcap range `{mcap_range}` · surge ≥ `{params.get(f'min_price_change_{interval}_percent')}%` · "
+        f"liq ≥ `{_fmt_usd(params.get('min_liquidity'))}`",
+        "",
+    ]
+    for r in kept:
+        addr = str(r.get("address") or "")
+        tlines.append(f"*#{r.get('rank')} {r.get('symbol') or addr[:6]}*  `{_fmt_pct(r.get('price_change_interval_pct'))}`")
+        tlines.append(f"  price `{_fmt_usd(r.get('price'))}` · mc `{_fmt_usd(r.get('market_cap'))}` · "
+                      f"liq `{_fmt_usd(r.get('liquidity'))}` · vol({interval}) `{_fmt_usd(r.get('volume_interval'))}`")
+        if mode == "advanced":
+            tlines.append(f"  dev `{_fmt_pct(r.get('dev_hold_pct'))}` · top10 `{_fmt_pct(r.get('top10_holder_pct'))}` · "
+                          f"KOL `{_ps_fmt_int(r.get('kol_buyer_count'))}`")
+        if r["risk_flags"]:
+            tlines.append(f"  ⚠ {' · '.join(_PS_RISK_LABELS.get(f, f) for f in r['risk_flags'])}")
+        tlines.append(f"  `{addr}`")
+    if not kept:
+        tlines.append("_no token survived the screen_")
+    if dropped:
+        tlines += ["", f"⛔ filtered out: {len(dropped)}"]
+    tlines += ["", f"⚡CU {cu} · scanned {len(rows)} · kept {len(kept)}"]
+    out_telegram = "\n".join(tlines)
+
+    # ── ui (list rows) ───────────────────────────────────────────────────────
+    _TONE_FG = {"good": "#86efac", "warn": "#fde68a", "bad": "#fca5a5"}
+    _TEXT = "#cbd5e1"
+    _MUTED = "#7b8794"
+    _TD = "padding:7px 9px;border-top:1px solid #171e28;white-space:nowrap"
+
+    def _num(value: str, tone: str | None = None, bold: bool = False) -> str:
+        fg = _TONE_FG.get(tone or "", _TEXT)
+        weight = "800" if bold else "600"
+        return (f'<td style="{_TD};text-align:right;color:{fg};'
+                f'font-weight:{weight}">{html.escape(value)}</td>')
+
+    def _tag(label: str, value: str, tone: str = "neutral") -> str:
+        fg = _TONE_FG.get(tone, _MUTED)
+        return (f'<span style="white-space:nowrap;color:{_MUTED}">{html.escape(label)} '
+                f'<b style="color:{fg}">{html.escape(value)}</b></span>')
+
+    def _health_cell(r: dict) -> str:
+        parts: list[str] = []
+        prof = r.get("profitable_wallet_ratio")
+        if prof is not None:
+            parts.append(_tag("prof", _fmt_pct(prof), "good" if prof >= 50 else "warn"))
+        tags = r.get("holder_tags") or {}
+        for name in ("dev", "bundler", "sniper", "insider"):
+            t = tags.get(name)
+            if not t:
+                continue
+            pct = t.get("percent_of_supply")
+            pct_txt = _fmt_pct(pct) if isinstance(pct, (int, float)) else "—"
+            tone = "warn" if isinstance(pct, (int, float)) and pct > 20 else "neutral"
+            parts.append(_tag(name, f"{_ps_fmt_int(t.get('holder_count'))}·{pct_txt}", tone))
+        return " · ".join(parts) or "—"
+
+    _BADGE_BG = {
+        "good": ("rgba(34,197,94,.16)", "rgba(34,197,94,.38)", "#86efac"),
+        "warn": ("rgba(250,204,21,.16)", "rgba(250,204,21,.38)", "#fde68a"),
+        "bad": ("rgba(239,68,68,.16)", "rgba(239,68,68,.38)", "#fca5a5"),
+        "neutral": ("#0f1115", "#202530", "#7b8794"),
+    }
+
+    def _badge(icon: str, tone: str, tip: str) -> str:
+        bg, bd, fg = _BADGE_BG.get(tone, _BADGE_BG["neutral"])
+        return (f'<span title="{html.escape(tip, quote=True)}" '
+                f'style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;'
+                f'border-radius:6px;background:{bg};border:1px solid {bd};color:{fg};font-size:10.5px;'
+                f'line-height:1;cursor:default">{icon}</span>')
+
+    def _security_cell(r: dict) -> str:
+        sec = r.get("security")
+        if not isinstance(sec, dict) or not sec:
+            return f'<span style="color:{_MUTED}">—</span>'
+        hp = sec.get("honeypot")
+        badges = [_badge("🍯", "neutral" if hp is None else ("bad" if hp else "good"),
+                         f"Honeypot: {'n/a' if hp is None else ('yes' if hp else 'no')}")]
+        mint = sec.get("mint_renounced")
+        badges.append(_badge("🔑", "neutral" if mint is None else ("good" if mint else "warn"),
+                             f"Mint authority: {'n/a' if mint is None else ('renounced' if mint else 'live')}"))
+        frz = sec.get("freeze_renounced")
+        badges.append(_badge("❄", "neutral" if frz is None else ("good" if frz else "warn"),
+                             f"Freeze authority: {'n/a' if frz is None else ('renounced' if frz else 'live')}"))
+        oss = sec.get("open_source_status")
+        badges.append(_badge("📝", "neutral" if oss is None else ("good" if oss == "immutable" else "warn"),
+                             f"Metadata: {oss or 'n/a'}"))
+        lp = sec.get("lp_locked")
+        badges.append(_badge("💧", "neutral" if lp is None else ("good" if lp else "warn"),
+                             f"LP: {'n/a' if lp is None else ('locked' if lp else 'unlocked')}"))
+        fee = sec.get("transfer_fee_pct")
+        badges.append(_badge("💸", "neutral" if fee is None else ("bad" if fee >= 10 else "good"),
+                             f"Transfer tax: {_fmt_pct(fee) if fee is not None else 'n/a'}"))
+        t10 = r.get("top10_holder_pct")
+        badges.append(_badge("👥", "neutral" if t10 is None else ("warn" if t10 >= 50 else "good"),
+                             f"Top-10 holders: {_fmt_pct(t10) if t10 is not None else 'n/a'}"))
+        return f'<div style="display:flex;gap:3px;align-items:center">{"".join(badges)}</div>'
+
+    def _row(r: dict) -> str:
+        addr = str(r.get("address") or "")
+        short = f"{addr[:6]}…{addr[-4:]}" if len(addr) > 10 else addr
+        delta = r.get("price_change_interval_pct")
+        logo = r.get("logo_uri") or ""
+        avg_vol = None
+        if r.get("volume_interval") and r.get("trade_interval_count"):
+            avg_vol = r["volume_interval"] / r["trade_interval_count"]
+        cells = [
+            f'<td style="{_TD};color:{_MUTED};font-weight:700;text-align:right">'
+            f'{html.escape(str(r.get("rank") or ""))}</td>',
+            f'<td style="{_TD}"><div style="display:flex;align-items:center;gap:8px;min-width:0">'
+            + (f'<img src="{html.escape(logo)}" alt="" style="width:22px;height:22px;border-radius:50%;'
+               'background:#161c26;object-fit:cover;flex:0 0 auto" onerror="this.style.visibility=\'hidden\'"/>'
+               if logo else "")
+            + f'<div style="min-width:0"><div style="font-weight:700;color:#f1f5f9;font-size:12.5px">'
+            f'{html.escape(str(r.get("symbol") or "?"))}'
+            f'<span style="font-weight:500;color:{_MUTED};font-size:10.5px"> · {html.escape(short)}</span></div>'
+            f'<div style="color:{_MUTED};font-size:10px;max-width:210px;overflow:hidden;'
+            f'text-overflow:ellipsis">{html.escape(str(r.get("name") or ""))}'
+            + (f' · {html.escape(str(r.get("platform")))}' if r.get("platform") else "")
+            + '</div></div></div></td>',
+            _num(_fmt_pct(delta), "good" if (delta or 0) >= 0 else "bad", bold=True),
+            _num(_fmt_usd(r.get("price"))),
+            _num(_fmt_usd(r.get("market_cap"))),
+            _num(_fmt_usd(r.get("liquidity"))),
+            _num(_fmt_usd(r.get("volume_interval"))),
+            _num(_ps_fmt_int(r.get("trade_interval_count"))),
+            _num(_ps_fmt_int(r.get("holder"))),
+        ]
+        if mode == "advanced":
+            dev = r.get("dev_hold_pct")
+            tw = r.get("trades_per_wallet_24h")
+            cells += [
+                _num(_fmt_pct(dev), "neutral" if dev is None else ("bad" if dev >= 10 else "good")),
+                _num(_ps_fmt_int(r.get("kol_buyer_count"))),
+                _num(_fmt_usd(avg_vol) if avg_vol is not None else "—"),
+                _num(f"{tw:.1f}" if tw is not None else "—",
+                     "warn" if tw is not None and tw > (cfg.get("max_trades_per_wallet") or 1e9) * 0.6 else None),
+                _num(_ps_ratio(r.get("liq_mcap_ratio"))),
+                f'<td style="{_TD}">{_health_cell(r)}</td>',
+            ]
+        if with_security:
+            cells.append(f'<td style="{_TD}">{_security_cell(r)}</td>')
+        flags = " · ".join(_tag("", _PS_RISK_LABELS.get(f, f), "warn") for f in r["risk_flags"])
+        cells.append(f'<td style="{_TD}">{flags or _tag("", "clean", "good")}</td>')
+        return "<tr>" + "".join(cells) + "</tr>"
+
+    top_surge = max((r.get("price_change_interval_pct") or 0) for r in kept) if kept else None
+    stat = lambda label, value, tone="neutral": _ps_kv(label, value, tone)
+    stats_html = "".join([
+        stat("Scanned", str(len(rows))),
+        stat("Kept", str(len(kept)), "good" if kept else "bad"),
+        stat("Filtered out", str(len(dropped)), "warn" if dropped else "neutral"),
+        stat("Hydrated", str(n_hydrated)),
+        stat("Interval", interval),
+        stat("Min surge", f"{params.get(f'min_price_change_{interval}_percent')}%"),
+        stat("MCap range", mcap_range),
+        stat("Top surge", _fmt_pct(top_surge) if top_surge is not None else "—", "good"),
+    ])
+    dropped_html = ""
+    if dropped:
+        d_rows = "".join(
+            '<tr>'
+            f'<td style="padding:5px 8px;color:#cbd5e1">{html.escape(str(r.get("symbol") or "?"))}</td>'
+            f'<td style="padding:5px 8px;color:#7b8794;font-family:ui-monospace">{html.escape(str(r.get("address") or "")[:10])}…</td>'
+            f'<td style="padding:5px 8px;color:#fca5a5">{html.escape(_PS_RISK_LABELS.get(str(r.get("exclude_reason")), str(r.get("exclude_reason"))))}</td>'
+            f'<td style="padding:5px 8px;text-align:right;color:#cbd5e1">{html.escape(_fmt_usd(r.get("market_cap")))}</td>'
+            f'<td style="padding:5px 8px;text-align:right;color:#cbd5e1">{html.escape(_fmt_usd(r.get("liquidity")))}</td>'
+            f'<td style="padding:5px 8px;text-align:right;color:#cbd5e1">{html.escape(_fmt_pct(r.get("price_change_interval_pct")))}</td>'
+            '</tr>'
+            for r in dropped)
+        dropped_html = (
+            '<div style="margin-top:14px">'
+            '<div style="font-size:12px;font-weight:800;color:#fca5a5;margin-bottom:6px">'
+            f'⛔ Auto-filtered ({len(dropped)})</div>'
+            '<div style="overflow:auto;border:1px solid #1e2530;border-radius:10px">'
+            '<table style="min-width:620px;width:100%;border-collapse:collapse;font-size:11.5px">'
+            '<thead><tr style="background:#121821;color:#94a3b8;text-align:left">'
+            '<th style="padding:6px 8px">Token</th><th style="padding:6px 8px">Address</th>'
+            '<th style="padding:6px 8px">Reason</th><th style="padding:6px 8px;text-align:right">MCap</th>'
+            '<th style="padding:6px 8px;text-align:right">Liquidity</th>'
+            f'<th style="padding:6px 8px;text-align:right">Δ{html.escape(interval)}%</th></tr></thead>'
+            f'<tbody>{d_rows}</tbody></table></div></div>'
+        )
+    note_html = (f'<div style="font-size:10.5px;color:#fde68a;margin-top:8px">note: '
+                 f'{html.escape(hydration_note)}</div>') if hydration_note else ""
+    _TH = 'padding:7px 9px;font-weight:700;white-space:nowrap'
+    head_cells = [
+        f'<th style="{_TH};text-align:right">#</th>',
+        f'<th style="{_TH};text-align:left">Token</th>',
+        f'<th style="{_TH};text-align:right">Δ{html.escape(interval)}%</th>',
+        f'<th style="{_TH};text-align:right">Price</th>',
+        f'<th style="{_TH};text-align:right">MCap</th>',
+        f'<th style="{_TH};text-align:right">Liq</th>',
+        f'<th style="{_TH};text-align:right">Vol({html.escape(interval)})</th>',
+        f'<th style="{_TH};text-align:right">Trades</th>',
+        f'<th style="{_TH};text-align:right">Holders</th>',
+    ]
+    if mode == "advanced":
+        head_cells += [
+            f'<th style="{_TH};text-align:right">Dev %</th>',
+            f'<th style="{_TH};text-align:right">KOL</th>',
+            f'<th style="{_TH};text-align:right">Avg trade</th>',
+            f'<th style="{_TH};text-align:right">Tx/Wallet</th>',
+            f'<th style="{_TH};text-align:right">Liq/MCap</th>',
+            f'<th style="{_TH};text-align:left">Health</th>',
+        ]
+    if with_security:
+        head_cells.append(
+            f'<th style="{_TH};text-align:left" '
+            f'title="Hover a badge: honeypot · mint · freeze · metadata · LP · tax · top-10">'
+            f'Security</th>')
+    head_cells.append(f'<th style="{_TH};text-align:left">Flags</th>')
+    table_head = f'<thead><tr style="background:#121821;color:#94a3b8;text-align:left">{"".join(head_cells)}</tr></thead>'
+    body_rows = "".join(_row(r) for r in kept)
+    table_html = (
+        '<div style="overflow:auto;border:1px solid #1e2530;border-radius:10px;margin-top:12px">'
+        '<table style="min-width:960px;width:100%;border-collapse:collapse;font-size:11.5px">'
+        + table_head + f'<tbody>{body_rows}</tbody></table></div>'
+    ) if kept else (
+        '<div style="color:#94a3b8;font-size:12px;padding:10px">No token survived the screen — '
+        'loosen the surge floor or the market-cap range.</div>'
+    )
+    html_out = (
+        '<div style="font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;'
+        'background:#0b0f14;color:#e2e8f0;padding:14px;border-radius:14px">'
+        '<div style="display:flex;align-items:baseline;gap:10px;flex-wrap:wrap">'
+        '<div style="font-size:16px;font-weight:800">💹 Price Surge Screen</div>'
+        f'<div style="font-size:11.5px;color:#94a3b8">{html.escape(chain_label)} · {html.escape(interval)} · '
+        f'mode {html.escape(mode_label)} · auto-filter {"on" if auto_filter else "off"} · sort '
+        f'{html.escape(sort_note)}</div></div>'
+        f'<div style="font-size:11px;color:#7b8794;margin-top:4px">market cap {html.escape(mcap_range)} · '
+        f'liquidity ≥ {html.escape(_fmt_usd(params.get("min_liquidity")))} · '
+        f'vol({html.escape(interval)}) ≥ {html.escape(_fmt_usd(params.get(f"min_volume_{interval}_usd")))} · '
+        f'surge ≥ {html.escape(str(params.get(f"min_price_change_{interval}_percent")))}%</div>'
+        f'<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:7px;margin-top:10px">'
+        f'{stats_html}</div>'
+        + table_html
+        + dropped_html + note_html
+        + '<div style="font-size:10px;color:#475569;margin-top:10px">⚡CU cost: '
+        + html.escape(str(cu)) + ' (' + html.escape(", ".join(breakdown_cu)) + ')</div>'
+        '</div>'
+    )
+
+    envelope = {
+        "schemaVersion": 1, "kind": "price-surge-v1", "run_id": run_id,
+        "cu_used": cu, "cu_breakdown": breakdown_cu,
+        "params": {
+            "chain": chain_norm, "interval": interval, "mode": mode,
+            "sort_by": params.get("sort_by"), "sort_type": sort_type,
+            "offset": offset, "limit": limit, "top": top, "platform": platform,
+            "min_price_change": params.get(f"min_price_change_{interval}_percent"),
+            "min_market_cap": min_mc, "max_market_cap": max_mc,
+            "min_liquidity": params.get("min_liquidity"), "max_liquidity": params.get("max_liquidity"),
+            "min_volume": params.get(f"min_volume_{interval}_usd"),
+            "min_trade_count": params.get(f"min_trade_{interval}_count"),
+            "min_holders": params.get("min_holder"),
+            "auto_filter": auto_filter, "holder_health": holder_health,
+            "with_security": with_security,
+            "caps": {"max_liq_mcap_ratio": cfg["max_liq_mcap_ratio"],
+                     "max_trades_per_wallet": cfg["max_trades_per_wallet"],
+                     "max_dev_hold_pct": cfg["max_dev_hold_pct"],
+                     "max_top10_pct": cfg["max_top10_pct"],
+                     "min_kol_buyers": cfg["min_kol_buyers"]},
+            "argv": sys.argv[1:],
+        },
+        "source": "birdeye", "source_label": "Birdeye /defi/v3/token/list",
+        "chain_label": chain_label, "mcap_range": mcap_range, "sort_note": sort_note,
+        "auto_filter": auto_filter, "holder_health": holder_health,
+        "n_scanned": len(rows), "n_rows": len(kept), "n_excluded": len(dropped),
+        "n_hydrated": n_hydrated, "hydration_note": hydration_note,
+        "dropped": [{"symbol": r.get("symbol"), "address": r.get("address"),
+                     "reason": r.get("exclude_reason"), "flags": r["risk_flags"]} for r in dropped],
+        "rows": kept, "raw_response": raw, "html": html_out,
+    }
+
+    raw_json_text = json.dumps(raw, ensure_ascii=False, indent=2 if fmt == "json" else None)
+
+    cdir = _cache_dir(getattr(args, "cache_dir", None))
+    file_payload = {
+        "runId": run_id, "kind": "price-surge-v1", "cached": False,
+        "cu_used_total": cu, "cu_breakdown": breakdown_cu,
+        "params": envelope["params"], "snapshot_time": int(time.time()),
+        "rendered_plain": out_plain,
+        "rendered_telegram": out_telegram,
+        "rendered_json": json.dumps(raw, ensure_ascii=False, indent=2),
+        "rendered_ui": json.dumps(envelope, ensure_ascii=False),
+        "rendered_raw-json": json.dumps(raw, ensure_ascii=False),
+        "rendered_rendered": json.dumps(envelope, ensure_ascii=False),
+        "out": json.dumps(envelope, ensure_ascii=False),
+    }
+    _write_cache(cdir, run_id, file_payload)
+    sys.stdout.write(f"#RUN_ID {run_id}\tprice-surge\tcu={cu}\n")
+
+    if fmt == "plain":
+        print(out_plain)
+        return 0
+    if fmt == "telegram":
+        print(out_telegram)
+        return 0
+    print(raw_json_text if fmt == "json" else json.dumps(envelope, ensure_ascii=False))
     return 0
 
 

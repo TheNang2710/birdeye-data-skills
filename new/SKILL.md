@@ -1,6 +1,6 @@
 ---
 name: birdeye-skills
-description: "Master guide for the Birdeye Skills CLI — install once, then run any of the six on-chain discovery & insight skills (token due-diligence, wallet score, wallet style, kline pattern, token trending, junk prediction) straight from the terminal. Use when a user wants to install the CLI, set up a Birdeye API key, or needs the command for a given skill without reading the source."
+description: "Master guide for the Birdeye Skills CLI — install once, then run any of the eight on-chain discovery & insight skills (token due-diligence, trending list, price surge, wallet score, wallet style, kline pattern, token trending, junk prediction) straight from the terminal. Use when a user wants to install the CLI, set up a Birdeye API key, or needs the command for a given skill without reading the source."
 argument-hint: "birdeye-cli <skill> --chain <sol|bsc|base|eth> … --format <ui|json|telegram|plain>"
 metadata:
   cli: "birdeye-cli"
@@ -10,19 +10,19 @@ metadata:
 
 # Birdeye Skills — Master Guide
 
-One CLI, six skills. Install it once, set one API key, then run any skill from the
+One CLI, eight skills. Install it once, set one API key, then run any skill from the
 terminal. You never need to open the source: this document is the whole contract —
 install, configure, run, read the output. Each skill also has its own
 `skills/<name>/SKILL.md` with flags, cost and error map.
 
 - **Entrypoint:** `birdeye-cli`
 - **Requires:** Python ≥ 3.10 · one third-party dep (`requests`)
-- **Skills:** `token-dd-score` · `wallet-score` · `wallet-style` · `kline-pattern` ·
-  `token-trending-score` · `junk-predict`
+- **Skills:** `token-dd-score` · `trending-list` · `price-surge` · `wallet-score` · `wallet-style` ·
+  `kline-pattern` · `token-trending-score` · `junk-predict`
 
 ## Core Capabilities
 
-- Six skills behind one command, one credential, one output contract
+- Eight skills behind one command, one credential, one output contract
 - Runs fully offline-installable — no source browsing required, this doc is enough
 - Four machine-safe output formats (`ui` · `json` · `telegram` · `plain`) plus `raw-json`
 - `json` and `plain` are HTML-free, ready for bots and pipelines
@@ -101,6 +101,8 @@ birdeye-cli <skill> [flags] --format <ui|json|telegram|plain|raw-json>
 | Skill | What it answers | Example |
 |---|---|---|
 | `token-dd-score` | Should I trust this token? risk + A+..F rating | `birdeye-cli token-dd-score --chain sol --address <MINT> --mode advanced --format json` |
+| `trending-list` | What is hot right now on this chain? | `birdeye-cli trending-list --chain sol --interval 24h --limit 20 --format plain` |
+| `price-surge` | What is surging in my market-cap band, risk-screened? | `birdeye-cli price-surge --chain solana --interval 5m --mode min --min-market-cap 50000 --max-market-cap 5000000 --format plain` |
 | `wallet-score` | Wallet alpha + copy-tradeability | `birdeye-cli wallet-score --chain sol --wallet <ADDR> --duration 30d --format plain` |
 | `wallet-style` | Scalper or swing? trading-style tag | `birdeye-cli wallet-style --chain sol --wallet <ADDR> --format plain` |
 | `kline-pattern` | Candlestick / chart pattern for a token | `birdeye-cli kline-pattern --chain sol --address <MINT> --resolution 15m --window 7d` |
@@ -186,6 +188,8 @@ Each skill is self-contained — its `SKILL.md` carries the credential guard, fl
 cost and error map, and is the source of truth for that skill:
 
 - [`skills/token-duediligence/SKILL.md`](skills/token-duediligence/SKILL.md) — token due-diligence
+- [`skills/trending-list/SKILL.md`](skills/trending-list/SKILL.md) — hot-token list passthrough
+- [`skills/price-surge/SKILL.md`](skills/price-surge/SKILL.md) — market-cap-banded price-surge screen with rug / wash / honeypot auto-filter
 - [`skills/wallet-score/SKILL.md`](skills/wallet-score/SKILL.md) — wallet alpha + copyability
 - [`skills/wallet-style/SKILL.md`](skills/wallet-style/SKILL.md) — trading-style tagger
 - [`skills/kline-pattern/SKILL.md`](skills/kline-pattern/SKILL.md) — candlestick patterns

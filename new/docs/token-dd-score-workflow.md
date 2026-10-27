@@ -2,7 +2,7 @@
 
 Step-by-step derivation of the **Token Due-Diligence Score** produced by
 [`skills/token-duediligence/token-dd-score.py`](../skills/token-duediligence/token-dd-score.py).
-Skill description & CLI reference: [`doc.md`](../skills/token-duediligence/doc.md).
+Skill description & CLI reference: [`SKILL.md`](../skills/token-duediligence/SKILL.md).
 
 > Every ramp in this document is **continuous** (smoothstep). Magnitudes that
 > span several orders (liquidity, market cap) use a **log-spaced ramp**. Every
@@ -17,19 +17,28 @@ Skill description & CLI reference: [`doc.md`](../skills/token-duediligence/doc.m
 ```
 Step 1  token_overview            (1 call, all 8 frames)  21 CU
 Step 2  token_security                                      30 CU
-        ---------------------------- standard ends here (51 CU)
+Step 2b liquidity latest (current total + exit, Solana)      5 CU
+        ---------------------------- standard ends here (56 CU)
 Step 3  holder distribution + holder-profile               60 CU
 Step 4  top holders + token money flow                    40 CU
 Step 5  liquidity OHLC (100 candles / 24h)                 30 CU
-        ------------------------- advanced total 181 CU ---
+        ------------------------- advanced total 186 CU ---
 
 Step 6  score 5 pillars  ->  weighted mean  ->  × gate
 Step 7  rating band + verdict  ->  render (ui/json/telegram/plain)  ->  cache
 ```
 
-`standard` = **Step 1 + Step 2 only**. `advanced` = all steps. Any endpoint that
-is Solana-only and the chain is not Solana is skipped and its CU is booked to
-`meta.cu_breakdown.refunded_rollback`.
+`standard` = **Step 1 + Step 2 (+ Step 2b on Solana)**. `advanced` = all steps.
+Any endpoint that is Solana-only and the chain is not Solana is skipped and its
+CU is booked to `meta.cu_breakdown.refunded_rollback`.
+
+**Why Step 2b exists.** `token_overview.liquidity` is a live snapshot but it
+carries **no exit liquidity**, and the liquidity OHLC endpoint only publishes
+*bar closes* — so using the last bar as "current" made the Liquidity tile drift
+behind the live overview figure (the mismatch this revision fixes).
+`POST /defi/v3/liquidity/latest/token` returns **current total + exit + stable
+liquidity** in one cheap call (5 CU, Solana only), so both modes get a
+same-instant snapshot instead of a stale candle close.
 
 ## Step 1 — Token overview (single call, 8 frames)
 
@@ -315,6 +324,16 @@ Default **`15m × 96 candles = last 24 h`** (`--liq-resolution`, `--liq-candles`
 
 Per candle: `close_liquidity_usd`, `close_exit_liquidity_usd`, `total_pairs`, `unix_time`.
 
+> **This window is the time series, not the "current" value.** The score's
+> `liq_now` / `exit_now` and the UI Liquidity / Exit-Liquidity tiles read the
+> **live snapshot** — `token_overview.liquidity` for total liquidity and
+> `POST /defi/v3/liquidity/latest/token` (Step 2b) for exit liquidity — so the
+> displayed depth is the same instant as the overview, not a bar close. The OHLC
+> closes only feed `stability`, `trend` and the drawdown gate. When the snapshot
+> is missing and the OHLC close is the fallback, the row carries
+> `*_source = "ohlc_close"` plus `*_age_seconds`, and the UI renders the value as
+> `Ns / Nm ago (OHLC close)` instead of presenting it as live.
+
 ### 5.1 Statistics collected
 
 The OHLC window is summarised into a nested `liquidity_stats` block — one
@@ -410,6 +429,37 @@ gate     = 1 − 0.050 = 0.950   (binding = liquidity_drawdown)
 `liquidity_drawdown` / `none`) and a reserved `holder_change_penalty` (always
 `null` — multi-interval holder change is a future deterioration input).
 
+### 5.3b Liquidity health label — `DYING` / `DEAD`
+
+The gate caps the total discount at 15 %, so a pool that is *nearly gone* can
+still hold a non-zero score (e.g. band `E` around 30/100). A separate label —
+attached to `score.liquidity_health`, **independent of the score** — states the
+pool state plainly. It never changes `final`; it only overrides the rendered
+verdict with an explicit warning.
+
+```
+dd    = max(liquidity_drawdown_from_peak_pct, exit_liquidity_drawdown_from_peak_pct)
+depth = min(liquidity_now, exit_liquidity_now)          # thinner pool binds
+
+DEAD   if dd >= 99 %   OR   depth < USD 10              # red, overrides the verdict
+DYING  elif dd >= 80 %                                  # amber
+else   LIQ_OK                                           # no label
+```
+
+| field | value |
+|---|---|
+| `code` | `LIQ_OK` / `LIQ_DYING` / `LIQ_DEAD` |
+| `label` | `null` / `DYING` / `DEAD` |
+| `tone` / `color` | `neutral` / `warn` (`#f59e0b`) / `bad` (`#ef4444`) |
+| `drawdown_pct` | worst drawdown used |
+| `depth_usd` | thinner pool used |
+| `reason` | human-readable cause |
+
+`LIQ_DEAD` / `LIQ_DYING` are rendered as the **first chip** in the score strip
+and beside the Rating chip in the hero, so `DEAD` is visible even when the
+rating band is still non-empty. It is surfaced in every format (`ui`, `plain`,
+`telegram`, `json`).
+
 Depth: `log_ramp_s(7.4 M, 1 500, 800 000) = 1` → 100;
 `log_ramp_s(4.0 M, 1 000, 400 000) = 1` → 100 ⇒ `depth = 100`.
 Valuation: `mcap/liquidity = 281.05 / 7.4 = 37.98` → `1 − smooth(0.199) = 0.897` → 89.7;
@@ -418,8 +468,10 @@ Valuation: `mcap/liquidity = 281.05 / 7.4 = 37.98` → `1 − smooth(0.199) = 0.
 
 ### 5.4 Standard mode
 
-No OHLC call ⇒ `stability` and `trend` are N/A (0.40 of the pillar weight) and
-`exit_now` is unknown ⇒ `depth` uses **total liquidity only** (single log ramp
+No OHLC call ⇒ `stability` and `trend` are N/A (0.40 of the pillar weight). On
+Solana the Step 2b snapshot still supplies live **total + exit** liquidity, so
+`depth` keeps both ramps; on other chains (no snapshot, no OHLC) `exit_now` is
+unknown ⇒ `depth` falls back to **total liquidity only** (single log ramp
 `USD 1,500` → `USD 800,000`). With no OHLC window there is no drawdown either, so the
 **gate is neutral at `1.000`** — the Liquidity pillar's own `depth` / `valuation`
 sub-scores carry the whole depth judgement. This is a materially weaker safety
@@ -592,10 +644,13 @@ twice. The re-scored response adds the caveat `0-CU re-score from cache`.
 |---|---|---:|---:|
 | `base` | token_overview (21) + token_security (30) | 51 | 51 |
 | `list` | distribution (30) + holder-profile (30) + top_holders (30) | 0 | 90 |
-| `advanced_security` | token_money_flow (10) + liquidity OHLC (30) | 0 | 40 |
+| `advanced_security` | token_money_flow (10) + liquidity OHLC (30) + liquidity latest (5) | 5 | 45 |
 | `risk_history` | reserved | 0 | 0 |
 | `refunded_rollback` | CU returned for Solana-only endpoints skipped on other chains | 0 | 0 |
-| **`cu_billed_total`** | | **51** | **181** |
+| **`cu_billed_total`** | | **56** | **186** |
+
+`liquidity_latest` bills 5 CU (**Solana only**, `ceil(5·n^0.8)`) in **both** modes —
+it is the cheapest way to give standard mode a live exit-liquidity figure.
 
 ---
 

@@ -276,9 +276,11 @@
 </div>
 <script>
 "use strict";
-const CHAINS = ["sol","bsc","base","eth","arc","robinhood"];
+const CHAINS = ["sol","bsc","base","eth","arc","robinhood","multi_chain"];
+const TRENDING_LIST_CHAINS = ["solana","bsc","base","ethereum","arbitrum","robinhood","multi_chain"];
+const PRICE_SURGE_CHAINS = ["solana","bsc","base","ethereum","arbitrum","robinhood"];
 function optLabel(v){
-  const m = {sol:"solana", eth:"ethereum", arc:"arbitrum", "":"(all)", unsupervised:"Unsupervised", function:"Function", supervised:"Supervised"};
+  const m = {sol:"solana", eth:"ethereum", arc:"arbitrum", multi_chain:"multi_chain", "":"(all)", unsupervised:"Unsupervised", function:"Function", supervised:"Supervised"};
   return m[v] || v;
 }
 function cliFormatForSkill(skill, fmt){
@@ -296,7 +298,7 @@ function canonFormatName(fmt){
   return f || "ui";
 }
 const SKILLS = [
-  {id:"token_dd_score", icon:"🧠", name:"Token Due-Diligence Score", desc:"5-pillar 0-100 due-diligence score with an A+..F risk rating", cmd:"token-dd-score", type:"token", cu:"51-181", inputs:[
+  {id:"token_dd_score", icon:"🧠", name:"Token Due-Diligence Score", desc:"5-pillar 0-100 due-diligence score with an A+..F risk rating", cmd:"token-dd-score", type:"token", cu:"56-186", inputs:[
     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
     {k:"address",label:"Token",type:"text",def:""},
     {k:"mode",label:"Mode",type:"select",opts:["standard","advanced"],def:"standard"},
@@ -307,7 +309,36 @@ const SKILLS = [
     {k:"resolution",label:"Resolution",type:"select",opts:["1m","5m","15m","30m","1h","4h","1d"],def:"15m"},
     {k:"window",label:"Window",type:"select",opts:["1d","3d","7d","14d","30d"],def:"7d"},
   ]},
-  {id:"trending_score", icon:"📈", name:"Token Trending Score", desc:"0-100 momentum score across 8 intervals", cmd:"token-trending-score", type:"token", cu:"~171", inputs:[
+  {id:"trending_list", icon:"🔥", name:"Trending Token List", desc:"Birdeye hot-token list, passed through without local scoring", cmd:"trending-list", type:"list", cu:"30", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:TRENDING_LIST_CHAINS,def:"solana"},
+    {k:"mode",label:"Mode",type:"select",opts:["selective","classic"],def:"selective"},
+    {k:"interval",label:"Interval",type:"select",opts:["5m","30m","1h","4h","24h"],def:"24h"},
+    {k:"sort_by",label:"Sort by",type:"select",opts:["rank","volumeUSD","liquidity"],def:"rank"},
+    {k:"sort_type",label:"Order",type:"select",opts:["desc","asc"],def:"asc"},
+    {k:"limit",label:"Limit",type:"text",def:"20"},
+    {k:"offset",label:"Offset",type:"text",def:"0"},
+    {k:"platform",label:"Platform",type:"text",def:"",placeholder:"pump.fun (optional)"},
+  ]},
+  {id:"price_surge", icon:"💹", name:"Price Surge Screen", desc:"Scan a chain for price-surge signals inside a market-cap band, then auto-filter rug-pull, wash-trade and honeypot risk", cmd:"price-surge", type:"list", cu:"50 (standard) · 650 (advanced top 10) · 950 (+security)", inputs:[
+    {k:"chain",label:"Chain",type:"select",opts:PRICE_SURGE_CHAINS,def:"solana"},
+    {k:"interval",label:"Interval",type:"select",opts:["1m","5m","30m","1h","2h","4h","8h","24h","7d","30d"],def:"1h"},
+    {k:"mode",label:"Mode",type:"select",opts:["standard","advanced"],def:"standard"},
+    {k:"min_price_change",label:"Min surge %",type:"text",def:"50"},
+    {k:"min_market_cap",label:"Min mcap",type:"text",def:""},
+    {k:"max_market_cap",label:"Max mcap",type:"text",def:""},
+    {k:"min_liquidity",label:"Min liquidity",type:"text",def:"10000"},
+    {k:"min_volume",label:"Min volume",type:"text",def:"5000"},
+    {k:"sort_by",label:"Sort by",type:"select",opts:["price_change","volume","market_cap","liquidity","trade_count","holder"],def:"price_change"},
+    {k:"sort_type",label:"Order",type:"select",opts:["desc","asc"],def:"desc"},
+    {k:"limit",label:"Limit",type:"text",def:"10"},
+    {k:"top",label:"Hydrate top (advanced)",type:"text",def:"10"},
+    {k:"max_top10_pct",label:"Max top-10 %",type:"text",def:""},
+    {k:"max_dev_hold_pct",label:"Max dev hold %",type:"text",def:""},
+    {k:"min_kol_buyers",label:"Min KOL buyers",type:"text",def:""},
+    {k:"with_security",label:"Security check (+30 CU/token)",type:"checkbox",def:false},
+    {k:"no_auto_filter",label:"Keep risky rows (turn auto-filter off)",type:"checkbox",def:false},
+  ]},
+  {id:"trending_score", icon:"📈", name:"Token Trending Score", desc:"0-100 momentum score across 8 intervals", cmd:"token-trending-score", type:"token", cu:"~176", inputs:[
     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
     {k:"address",label:"Token",type:"text",def:""},
     {k:"model",label:"Model",type:"select",opts:["classic","hybrid"],def:"classic"},
@@ -511,8 +542,8 @@ $("outputArea").addEventListener("click", e=>{
 const FLOW_BY_ID = {
   token_dd_score:{doc:"token-dd-score-workflow.md",steps:[
       "Paste the token address and pick the chain (sol · bsc · base · eth · arc · robinhood)",
-      "standard mode — 2 calls (~51 CU): token_overview + token_security. All five pillars are still emitted; pillars without data are renormalized, not zeroed",
-      "advanced mode — all sources (~181 CU): adds holder distribution, holder profile, top holders, token money flow and 24h liquidity OHLC",
+      "standard mode — 2 calls (~56 CU on Solana): token_overview + token_security + a 5 CU live liquidity snapshot for current total & exit depth. All five pillars are still emitted; pillars without data are renormalized, not zeroed",
+      "advanced mode — all sources (~186 CU on Solana): adds holder distribution, holder profile, top holders, token money flow and 24h liquidity OHLC",
       "Score the five pillars — Security · Holders · Activity · Liquidity · Smart Money — each a weighted mean of ramped sub-scores",
       "Apply the smooth liquidity-drawdown gate, then read the 0-100 Token Due-Diligence Score and the A+..F rating (HOT → CRITICAL)",
     ],caps:[
@@ -536,7 +567,37 @@ const FLOW_BY_ID = {
       "Resolution is selectable from 1m to 1d so scalping and swing candles are both covered",
       "Needs at least 8 candles in the window; CU scales with candle count (25-100)",
     ],prompt:"Analyse the 15m candles for this token and identify the current pattern with its score."},
-  trending_score:{doc:"skill-22-token-trending-score.md",steps:[
+  trending_list:{doc:"trending-list-workflow.md",steps:[
+      "Pick the chain (including multi_chain), the mode, interval and Birdeye-side sort order",
+      "Use `selective` for all intervals; `classic` only supports 1h, 4h and 24h",
+      "Call `/defi/token_trending` once — no local score, no re-ranking, 30 CU flat",
+      "Map the returned token rows into a compact leaderboard card for the UI",
+      "Keep `json` as the upstream response payload so automation gets the raw API shape",
+      "Use `token-trending-score` only when you want to score one token instead of listing hot tokens",
+    ],caps:[
+      "Pure Birdeye passthrough — the ranking belongs to Birdeye, not to a local model",
+      "One cheap call returns the whole list — no per-token follow-up requests",
+      "Compact params: chain · mode · interval · sort · limit · offset · optional platform note",
+      "Each token logo carries a small chain badge; in multi_chain mode the badge follows the row's own chain",
+      "UI focuses on discoverability with summary cards plus a dense table like a screener",
+      "JSON stays close to the raw response for bots and downstream pipelines",
+    ],prompt:"Show me the hottest tokens on this chain right now from Birdeye's trending endpoint, without re-scoring them locally."},
+  price_surge:{doc:"price-surge-workflow.md",steps:[
+      "Pick the chain, the surge window (interval) and the market-cap band you care about",
+      "standard mode — one token-list call (50 CU flat): the network applies the surge / liquidity / volume floors and the market-cap band server-side, then structural rug + wash proxies run locally",
+      "advanced mode — add the same list plus per-token depth for the top rows: top-trader tags and holder-profile cohorts (Solana), with an optional `--with-security` security check (+30 CU/token)",
+      "Auto-filter the high-risk rows — thin liquidity, no sell side (honeypot proxy), wash-trade churn, dev-hold and top-10 concentration over the caps — and keep them visible in the filtered table instead of dropping them silently",
+      "Read the compact list-row table: price · market cap · liquidity · volume, plus dev hold, top-10 concentration and KOL counts, with one collapsed health cell and one collapsed security cell on hydrated rows",
+    ],caps:[
+      "Two cost tiers over the same surge feed: standard = one 50 CU token-list call, advanced = that list plus per-token hydration bounded by `--top`",
+      "The market-cap range is applied server-side, so the band filter costs nothing extra in CU",
+      "Auto-filter is field-driven and reversible: thin liquidity, honeypot proxy (no sell side), wash-trade churn (trades / unique wallets), dev hold and top-10 concentration — every removed row is still shown with its reason",
+      "Security check (opt-in) surfaces honeypot detection, mint/freeze renouncement, metadata open-source status, LP lock, buy/sell tax and top-10 concentration",
+      "Holder health surfaces top-10 concentration, per-cohort tag distribution and the profitable-wallet ratio",
+      "Runs on solana · bsc · base · ethereum · arbitrum · robinhood; the holder-profile call is Solana-only and flagged when skipped",
+      "Pure CLI filters — you choose the chain, window, band and caps; no need to know which endpoint backs each field",
+    ],prompt:"Scan this chain for price-surge tokens inside my market-cap band and tell me which ones survive the rug / wash / honeypot screen."},
+  trending_score:{doc:"token-trending-score-workflow.md",steps:[
       "Paste the token address and pick the chain",
       "classic mode — OHLCV + liquidity + holders + security only: a 6-component momentum score per interval, no overview wallet/volume frames required",
       "hybrid mode — classic plus the interval-native formula on 1h/4h/24h: 1.0·log10(1+wallets) + 0.5·log10(1+volume) + 0.25·pace_now + 0.25·pace_window + 0.25·tanh(price/25), blended 0.55 native / 0.45 classic (wallets from token_overview; price & candles from OHLCV + overview)",
@@ -870,6 +931,47 @@ function renderForm(){
     inp.addEventListener('keydown',e=>{ if(e.key==="Enter" && !e.shiftKey){ e.preventDefault(); runSkill(); } });
     inp.addEventListener("focus", ()=>{ try{ inp.select(); }catch(e){}; });
   });
+  if(s.id === "trending_list"){
+    const mode = $("inp_mode");
+    const interval = $("inp_interval");
+    const sortBy = $("inp_sort_by");
+    const sortType = $("inp_sort_type");
+    if(mode && interval){
+      const syncTrendingMode = ()=>{
+        if(mode.value === "classic" && ["5m","30m"].includes(interval.value)){
+          interval.value = "1h";
+        }
+        updateCmdPreview();
+      };
+      mode.addEventListener("change", syncTrendingMode);
+      interval.addEventListener("change", syncTrendingMode);
+      syncTrendingMode();
+    }
+    if(sortBy && sortType){
+      const syncTrendingSortType = ()=>{
+        sortType.value = (sortBy.value === "rank") ? "asc" : "desc";
+        updateCmdPreview();
+      };
+      sortBy.addEventListener("change", syncTrendingSortType);
+      syncTrendingSortType();
+    }
+  }
+  if(s.id === "price_surge"){
+    const mode = $("inp_mode");
+    const advKeys = ["top","max_top10_pct","max_dev_hold_pct","min_kol_buyers","with_security"];
+    const syncPriceSurgeMode = ()=>{
+      const adv = !mode || mode.value === "advanced";
+      advKeys.forEach(k=>{
+        const el = $("inp_"+k);
+        if(!el) return;
+        el.disabled = !adv;
+        const wrap = el.closest(".fld");
+        if(wrap) wrap.style.opacity = adv ? "1" : ".45";
+      });
+      updateCmdPreview();
+    };
+    if(mode){ mode.addEventListener("change", syncPriceSurgeMode); syncPriceSurgeMode(); }
+  }
   s.inputs.forEach(i=>{
     const e2 = $("inp_"+i.k);
     if(e2) e2.addEventListener("change", updateCmdPreview);
@@ -883,7 +985,7 @@ function buildArgv(){
   const argv = [s.cmd || s.script || s.id];
   s.inputs.forEach(i=>{
     const el = $("inp_"+i.k);
-    if(!el) return;
+    if(!el || el.disabled) return;
     if(i.type==="checkbox"){
       if(s.id==="junk" && i.k==="include_holding_distribution"){
         if(el.checked) argv.push("--include", "holding_distribution");

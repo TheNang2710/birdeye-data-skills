@@ -25,7 +25,7 @@ self-contained wrapper that talks to Birdeye, assembles the inputs, calls
 `compute_trending_score(...)` and renders plain / telegram / json / ui.
 
 --------------------------------------------------------------------------------
-SCORING MODEL (see docs/skill-22-token-trending-score.md for the derivation)
+SCORING MODEL (see docs/token-trending-score-workflow.md for the derivation)
 --------------------------------------------------------------------------------
 Six weighted components combine into one 0-100 score per interval
 (5m, 15m, 30m, 1h, 4h, 6h, 12h, 24h):
@@ -66,6 +66,7 @@ CU COST (per call)
   /defi/token_creation_info ................ 35
   /defi/v3/ohlcv (1m candles) .............. 25-100  (scales with candle count)
   /defi/v3/liquidity/history/token ......... 20
+  /defi/v3/liquidity/latest/token .......... 5  (Solana only, ceil(5*n^0.8))
   /defi/token_overview?includes=money_flow . 21
   /defi/v3/ohlcv (1s candles) .............. 25-100
   /token/v1/holder/chart ................... 30
@@ -132,14 +133,15 @@ INTERVALS = list(getattr(_ENGINE, "INTERVALS", FALLBACK_INTERVALS))
 
 def compute(ovd, secd, snapshots=None, candles_1m=None, liq_1m=None,
             candles_1s=None, holder_chart=None, holder_profile=None,
-            model="classic", chain=None):
+            model="classic", chain=None, liq_snapshot=None):
     """Delegate to modules/trending_score.compute_trending_score."""
     if _ENGINE is None:
         raise RuntimeError("modules/trending_score.py not found")
     return _ENGINE.compute_trending_score(
         ovd, secd, snapshots, candles_1m, liq_1m,
         candles_1s=candles_1s, holder_chart=holder_chart,
-        holder_profile=holder_profile, model=model, chain=chain)
+        holder_profile=holder_profile, model=model, chain=chain,
+        liq_snapshot=liq_snapshot)
 
 
 # ===========================================================================
@@ -186,6 +188,32 @@ class Api:
             "X-API-KEY": self.key,
             "x-chain": CHAINS.get(self.chain, self.chain),
             "Accept": "application/json",
+        })
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as r:
+                body = json.loads(r.read().decode("utf-8", "replace"))
+        except urllib.error.HTTPError as e:
+            detail = ""
+            try:
+                detail = e.read().decode("utf-8", "replace")[:200]
+            except Exception:
+                pass
+            raise RuntimeError(f"[E{e.code}] {label}: {detail or e.reason}")
+        except Exception as e:
+            raise RuntimeError(f"{label}: {type(e).__name__} {e}")
+        if isinstance(body, dict) and body.get("success") is False:
+            raise RuntimeError(f"{label}: success=false {str(body)[:160]}")
+        return body.get("data") if isinstance(body, dict) and "data" in body else body
+
+    def post(self, path, payload):
+        label = path.rsplit("/", 1)[-1]
+        url = f"{BIRDEYE_BASE}{path}"
+        data = json.dumps(payload).encode("utf-8")
+        req = urllib.request.Request(url, data=data, method="POST", headers={
+            "X-API-KEY": self.key,
+            "x-chain": CHAINS.get(self.chain, self.chain),
+            "Accept": "application/json",
+            "Content-Type": "application/json",
         })
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as r:
@@ -589,6 +617,24 @@ def cmd_trending_score(args) -> int:
     if not liq_1m:
         breakdown_cu.append("liq=FAIL")
 
+    # -- 2b) Live liquidity snapshot (Solana) — current total + exit liquidity --
+    # The gate needs *current* depth, not the last bar close, so prefer this
+    # snapshot over the OHLC tail. CU = ceil(5 * n^0.8), n = 1 -> 5.
+    liq_snapshot: dict = {}
+    if str(chain or "").strip().lower() in ("sol", "solana"):
+        try:
+            raw_latest = api.post("/defi/v3/liquidity/latest/token",
+                                  {"addresses": [address]})
+            items = raw_latest.get("items") if isinstance(raw_latest, dict) else raw_latest
+            if isinstance(items, list) and items and isinstance(items[0], dict):
+                liq_snapshot = items[0]
+                cu += 5
+                breakdown_cu.append("liq_latest=5")
+            else:
+                breakdown_cu.append("liq_latest=EMPTY")
+        except RuntimeError as e:
+            breakdown_cu.append(f"liq_latest=FAIL({str(e)[:30]})")
+
     # -- 3) Token overview (includes=money_flow for wallet dynamics) --
     ovd: dict = {}
     try:
@@ -660,6 +706,7 @@ def cmd_trending_score(args) -> int:
         ovd, secd, snapshots, candles_1m, liq_1m,
         candles_1s=candles_1s, holder_chart=holder_chart,
         holder_profile=holder_profile, model=model, chain=chain,
+        liq_snapshot=liq_snapshot,
     )
 
     symbol = ovd.get("symbol") or ""
@@ -697,6 +744,24 @@ def cmd_trending_score(args) -> int:
             _g.get("holder", {}).get("multiplier", 1.0),
             _g.get("holder", {}).get("reason", "-"),
             _g.get("combined_multiplier", 1.0)))
+    _liq_plain = _g.get("liquidity", {})
+    if _liq_plain:
+        plain_lines.append(
+            "Effective depth: {} (source: {}{})".format(
+                _fmt_usd(_liq_plain.get("effective_liquidity")),
+                _liq_plain.get("liquidity_source") or "-",
+                (" · exit " + str(_liq_plain.get("exit_liquidity_source")))
+                if _liq_plain.get("used_exit_liquidity") else ""))
+        if _liq_plain.get("ohlc_age_seconds") is not None:
+            plain_lines.append(
+                "  ⚠ exit/liquidity from OHLC close — {}s ago vs request time".format(
+                    int(_liq_plain.get("ohlc_age_seconds"))))
+    _liq_health = result.get("liquidity_health") or {}
+    if _liq_health.get("label"):
+        plain_lines.append(
+            "LIQUIDITY {} — {} (drawdown {}, depth {})".format(
+                _liq_health["label"], _liq_health.get("reason"),
+                _liq_health.get("drawdown_pct"), _liq_health.get("depth_usd")))
     plain_lines.append("")
     plain_lines.append(f"{'Interval':<10} {'Score':>8} {'Vol':>6} {'Swap':>6} "
                        f"{'Price':>7} {'Liq':>6} {'Hold':>6} {'Sec':>6}")
@@ -732,6 +797,10 @@ def cmd_trending_score(args) -> int:
                 (f"Overall: *{overall}/100*" if overall is not None else "Overall: N/A")]
     if result["is_risky"]:
         tg_lines.append("⚠️ *JUNK GATE* — weighted security/liquidity/holder penalty active")
+    _tg_health = result.get("liquidity_health") or {}
+    if _tg_health.get("label"):
+        _mark = "🔴" if _tg_health["code"] == "LIQ_DEAD" else "🟠"
+        tg_lines.append(f"{_mark} *LIQUIDITY {_tg_health['label']}* — {_tg_health.get('reason')}")
     tg_lines.append("```")
     tg_lines.append(f"{'IV':<6}{'Score':>7}{'Vol':>6}{'Swp':>6}{'Px':>6}"
                     f"{'Liq':>6}{'Hld':>6}{'Sec':>6}")
@@ -801,6 +870,18 @@ def cmd_trending_score(args) -> int:
                   if pipeline_gap else
                   '<div style="display:inline-block;background:#22c55e22;color:#22c55e;padding:2px 8px;border-radius:6px;font-size:11px;font-weight:700;border:1px solid #22c55e">✓ data ok</div>')
     model_meta = f'<span>Model: <b style="color:#e2e8f0">{model}</b></span>'
+    # Liquidity health (DYING / DEAD) — independent of the score, shown up top so it
+    # overrides the rest of the badge row even when the trending score is still fine.
+    _hl = result.get("liquidity_health") or {}
+    if _hl.get("label"):
+        _hc = _hl.get("color") or "#ef4444"
+        liq_health_badge = (
+            f'<div style="display:inline-block;background:{_hc}22;color:{_hc};padding:2px 8px;'
+            f'border-radius:6px;font-size:11px;font-weight:700;border:1px solid {_hc}">'
+            f'LIQUIDITY {_hl["label"]}'
+            f'<span style="font-weight:400;color:#94a3b8"> · {_hl.get("reason")}</span></div>')
+    else:
+        liq_health_badge = ""
     # Only surface actionable (critical/warn) pipeline issues — info-level notes
     # (e.g. snapshot-baseline provenance) are noise and are dropped from the UI.
     notable = [x for x in warnings if x["level"] in ("critical", "warn")]
@@ -826,6 +907,15 @@ def cmd_trending_score(args) -> int:
     _hol_g = _g.get("holder", {})
     _liq_eff = _liq_g.get("effective_liquidity")
     _exit_used = _liq_g.get("used_exit_liquidity")
+    _liq_age = _liq_g.get("ohlc_age_seconds")
+    _liq_stale = (_liq_g.get("liquidity_source") == "ohlc_close"
+                  or _liq_g.get("exit_liquidity_source") == "ohlc_close")
+    if _liq_stale and _liq_age is not None:
+        _age_txt = (f"{int(_liq_age)}s ago" if int(_liq_age) < 90
+                    else f"{int(round(_liq_age / 60))}m ago")
+        _stale_html = f' <span style="color:#f59e0b">· {_age_txt} (OHLC close)</span>'
+    else:
+        _stale_html = ""
     gate_rows = (
         f'<div style="font-size:11px;color:#94a3b8;padding:1px 0">Security gate (35%) '
         f'<b style="color:#e2e8f0">×{_sec_g.get("multiplier", 1.0):.2f}</b> '
@@ -843,6 +933,7 @@ def cmd_trending_score(args) -> int:
         f'<b style="color:#e2e8f0">{_fmt_usd(_liq_eff)}</b>'
         + (f' <span style="color:#64748b">· exit liquidity {_fmt_usd(_liq_g.get("exit_liquidity"))} (used)</span>'
            if _exit_used else '')
+        + _stale_html
         + '</div>')
 
     sec_penalties = result["security"].get("penalties", [])
@@ -864,6 +955,7 @@ def cmd_trending_score(args) -> int:
   </div>
 </div>
 <div style="display:flex;align-items:center;gap:8px;margin-bottom:14px;font-size:11px;color:#64748b;flex-wrap:wrap">
+  {liq_health_badge}
   {risky_badge}
   {data_badge}
   {model_meta}
@@ -897,6 +989,7 @@ def cmd_trending_score(args) -> int:
         "overall_trending_score": overall,
         "intervals": intervals,
         "is_risky": result["is_risky"],
+        "liquidity_health": result.get("liquidity_health"),
         "gates": result.get("gates") or {},
         "security": result["security"],
         "weights": result["weights"],
@@ -928,6 +1021,7 @@ def cmd_trending_score(args) -> int:
         "model": model, "symbol": symbol, "name": name,
         "intervals": intervals,
         "is_risky": result["is_risky"],
+        "liquidity_health": result.get("liquidity_health"),
         "security": result["security"],
         "weights": result["weights"],
         "meta": result["meta"],
@@ -985,7 +1079,7 @@ def add_parser(sub, chains=None):
         "token-trending-score",
         help="Skill #22 · Token Trending Score — 0..100 momentum score per interval "
              "(5m/15m/30m/1h/4h/6h/12h/24h) from OHLCV + liquidity + holders + security. "
-             "Typical ~171 CU (ohlcv 100 + liq 20 + overview 21 + security 30 + extras).",
+             "Typical ~176 CU (ohlcv 100 + liq 20 + liq-latest 5 + overview 21 + security 30 + extras).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
             "Six weighted components (volume/swaps/price/liquidity/holder/security)\n"

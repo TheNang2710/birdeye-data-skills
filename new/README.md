@@ -1,6 +1,6 @@
 # Birdeye Skills
 
-Six self-contained discovery & insight skills for [Birdeye](https://birdeye.so) data, plus a
+Eight self-contained discovery & insight skills for [Birdeye](https://birdeye.so) data, plus a
 zero-dependency local console. Everything lives in this folder — CLI, skill logic, ML model
 assets, agent manifests, docs and UI.
 
@@ -27,10 +27,13 @@ new/
 │   ├── wallet-score/            # SKILL.md
 │   ├── wallet-style/            # SKILL.md
 │   ├── kline-pattern/           # SKILL.md
+│   ├── trending-list/           # SKILL.md
+│   ├── price-surge/             # SKILL.md
 │   ├── token-trending-score/    # SKILL.md
 │   └── junk-predict/            # SKILL.md
 ├── public/index.html            # console UI (self-contained)
-└── docs/                        # per-skill workflow documentation
+├── docs/                        # public per-skill workflow docs (one *-workflow.md per skill)
+└── docs-local/                  # local-only full derivations (git-ignored)
 ```
 
 ## Quick Start (AI Agent)
@@ -80,6 +83,8 @@ the CLI already wraps every endpoint, the CU accounting and the output contract.
 | User intent | Skill (SKILL.md) |
 |---|---|
 | "Should I buy this token?", risk score, rug check, holder concentration, money flow | `token-dd-score` |
+| "What is trending right now?", hot token list, Birdeye leaderboard | `trending-list` |
+| Surging / pumping tokens right now, market-cap band screener, auto rug / wash / honeypot screen | `price-surge` |
 | Score a wallet, copy-trade quality, wallet alpha | `wallet-score` |
 | Scam / low-quality / filter dust tokens, junk score | `junk-predict` |
 | Candlestick / chart pattern for a token | `kline-pattern` |
@@ -119,9 +124,11 @@ The full key is **never** printed — only a `head2****tail2` mask.
 
 | Subcommand | What it does | CU |
 |---|---|---|
-| `token-dd-score` | Token Due-Diligence Score 0-100 + A+..F rating (standard / advanced) | 51 / 181 |
+| `token-dd-score` | Token Due-Diligence Score 0-100 + A+..F rating (standard / advanced) | 56 / 186 |
 | `kline-pattern` | Candlestick pattern classifier + 0..100 score | 25-100 |
-| `token-trending-score` | 0..100 momentum score per interval | ~171 |
+| `trending-list` | Birdeye hot-token list passthrough | 30 |
+| `price-surge` | Price-surge screen in a market-cap band + auto rug / wash / honeypot filter (min / advanced) | 50 / 50-430 |
+| `token-trending-score` | 0..100 momentum score per interval | ~176 |
 | `junk-predict` | ML junk-token score (unsupervised LR16 / function heuristic / supervised GBM) | 51 / token |
 | `wallet-score` | Wallet alpha score + copy-tradeability breakdown | 30-110 |
 | `wallet-style` | Trading-style tagger (frequency × P&L grid) | 60-90 |
@@ -150,6 +157,8 @@ The console runs each skill as a subprocess of `birdeye_cli.py` and renders the 
 ```bash
 birdeye-cli token-dd-score --chain sol --address <MINT> --mode advanced --format plain
 birdeye-cli kline-pattern  --chain sol --address <MINT> --resolution 15m --window 7d
+birdeye-cli trending-list  --chain sol --interval 24h --limit 20 --format plain
+birdeye-cli price-surge    --chain solana --interval 5m --mode min --min-market-cap 50000 --max-market-cap 5000000
 birdeye-cli junk-predict   --chain sol --tokens <MINT1>,<MINT2> --model unsupervised
 birdeye-cli wallet-score   --chain sol --wallet <ADDR> --duration 30d
 birdeye-cli wallet-style   --chain sol --wallet <ADDR>
@@ -158,6 +167,16 @@ birdeye-cli history-list
 ```
 
 (Without a global install, prefix each with `python3 birdeye_cli.py`.)
+
+### Exit codes
+
+| Exit | Meaning | CU spent? |
+|---:|---|---|
+| 0 | Success | Actual CU |
+| 2 | Invalid args / address / key (argparse / preflight) | 0 CU |
+| 3 | API key missing | 0 CU |
+| 4 | Birdeye upstream HTTP error | Partial possible on 429 |
+| 5 | Post-response invariant failed | CU (already called) — `pipeline_gap` badge |
 
 ## Configuration
 
@@ -171,13 +190,25 @@ birdeye-cli history-list
 
 ## Docs
 
-Per-skill workflows live in [`docs/`](docs/): token-dd-score, kline-pattern,
-token-trending-score, wallet-score, wallet-style.
+Public per-skill workflow docs live in [`docs/`](docs/) — one `*-workflow.md` per skill
+(token-dd-score, token-trending-score, trending-list, price-surge, wallet-score, wallet-style,
+wallet-analysis, kline-pattern, junk — spam-token-cleaner, rugcheck-audit, smart-money-profile).
+
+The deeper local-only derivations (full formulas, scoring research, raw API walkthroughs) stay in
+`docs-local/` (git-ignored, never published).
 
 ## Notes
 
-- Standard `token-dd-score` mode pulls overview + security (~51 CU); advanced adds holder
-  distribution, holder profile, top holders, token money flow and 24h liquidity OHLC (~181 CU).
-- Liquidity statistics are computed from 96 × 15m candles = 24 h (min / max / current /
-  median / p05 / p95 / drawdown / floor-of-now / trend).
+- Standard `token-dd-score` mode pulls overview + security + a live liquidity snapshot (~56 CU);
+  advanced adds holder distribution, holder profile, top holders, token money flow and 24h
+  liquidity OHLC (~186 CU).
+- The "current" liquidity / exit-liquidity figure is a **live snapshot** (`token_overview` +
+  `POST /defi/v3/liquidity/latest/token`), never a stale OHLC bar close; the 96 × 15m window is
+  used only for the time-series statistics (min / max / median / p05 / p95 / drawdown / floor-of-now /
+  trend).
+- `trending-list` is deliberately thin: one `/defi/token_trending` call, one list, no local scoring.
+- `price-surge` starts from token list v3: `min` is a single 50 CU call with the market-cap band and
+  surge / liquidity / volume floors applied server-side; `advanced` hydrates at most `--top` rows with
+  security, smart-money, top-trader and (Solana) holder-health data. Excluded rows stay visible with
+  their reason; `--no-auto-filter` keeps them all.
 - Ratings are risk labels only — no buy/sell recommendations.

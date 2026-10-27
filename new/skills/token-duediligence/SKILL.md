@@ -1,11 +1,11 @@
 ---
 name: token-dd-score
-description: "Should I buy this token — Birdeye Token Due-Diligence Score. Produces a 0-100 score plus an A+..F risk rating across five weighted pillars (Security, Holders, Activity, Liquidity, Smart Money), then a smooth liquidity-drawdown gate. Two depths are available — standard (token_overview + token_security, ~51 CU) and advanced (adds holder distribution / profile / top holders / token money flow / 24h liquidity OHLC, ~181 CU). Use when the user asks for token due diligence, token DD, token risk score, should I buy this token, rug check, holder concentration, buy/sell pressure, money flow, or a token scorecard."
+description: "Should I buy this token — Birdeye Token Due-Diligence Score. Produces a 0-100 score plus an A+..F risk rating across five weighted pillars (Security, Holders, Activity, Liquidity, Smart Money), then a smooth liquidity-drawdown gate. Two depths are available — standard (token_overview + token_security + live liquidity snapshot, ~56 CU) and advanced (adds holder distribution / profile / top holders / token money flow / 24h liquidity OHLC, ~186 CU). Use when the user asks for token due diligence, token DD, token risk score, should I buy this token, rug check, holder concentration, buy/sell pressure, money flow, or a token scorecard."
 argument-hint: "token-dd-score --chain <sol|bsc|base|eth> --address <MINT> [--mode <standard|advanced>] [--top-n <10|20|50>] [--weights-preset <name>] [--format <ui|json|telegram|plain|raw-json>]"
 metadata:
   cliHelp: "birdeye-cli token-dd-score --help"
-  cuPerStandard: 51
-  cuPerAdvanced: 181
+  cuPerStandard: 56
+  cuPerAdvanced: 186
   pillars: "security, holders, activity, liquidity, smart_money"
 ---
 
@@ -22,6 +22,8 @@ pillar score reflects measured coverage only (weights renormalize instead of col
 - Missing sub-signals are dropped and their weight removed, so a pillar reflects measured coverage instead of silently passing — each pillar reports its coverage and a `⚠ coverage_caveat` flags thin runs
 - A confirmed honeypot is a hard stop: the Security pillar is forced to 0
 - Ends with a smooth liquidity-drawdown gate, then maps the score to an A+..F risk rating
+- Adds a score-independent `liquidity_health` label — `DYING` (liquidity down 80–99% from peak) or a red `DEAD` (≥99% down, or either pool below USD 10) — shown even when the score is still non-zero
+- Liquidity depth is a **live snapshot** — total from `token_overview`, exit from `POST /defi/v3/liquidity/latest/token` — never a stale OHLC bar close; if OHLC is the fallback the value is labelled `… ago (OHLC close)`
 - Every deduction names the field behind it, so any low score stays traceable
 - Runs on `sol` · `bsc` · `base` · `eth` · `arc` · `robinhood`
 
@@ -47,7 +49,7 @@ birdeye-cli token-dd-score --chain sol --address <MINT> --mode standard --format
 |---|---|---|
 | `--chain` | `sol` | `sol` · `bsc` · `base` · `eth` |
 | `--address` | — | **required**, token contract / mint |
-| `--mode` | `standard` | `standard` = 2 APIs (51 CU) · `advanced` = all pillars (181 CU) |
+| `--mode` | `standard` | `standard` = overview + security + live liquidity snapshot (56 CU) · `advanced` = all pillars (186 CU) |
 | `--top-n` | `20` | holder rows from distribution (advanced): `10` · `20` · `50` |
 | `--liq-resolution` | `15m` | `auto` = 15m for the 24h window |
 | `--liq-candles` | `96` | liquidity OHLC candles (max 100); 15m × 96 = 24h |

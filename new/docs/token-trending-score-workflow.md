@@ -133,9 +133,23 @@ holder_gate(h)      = piecewise ramp on holder count:
                       >= 2 000         → 1.00
 ```
 
-`effective_liquidity` is the realistic sell-side depth: on **Solana** it is
-`min(liquidity, exit_liquidity)` when the exit figure is reported, otherwise the
-reported `liquidity`.
+`effective_liquidity` is the realistic sell-side depth. It is resolved from the
+**live snapshot** first, and the OHLC series is only a fallback:
+
+| side | priority order |
+|---|---|
+| total liquidity | `token_overview.liquidity` → `liquidity/latest.liquidity_usd` → last OHLC close |
+| exit liquidity | `liquidity/latest.exit_liquidity_usd` → last OHLC close |
+
+On **Solana** the effective depth is `min(liquidity, exit_liquidity)` when the exit
+figure is reported, otherwise the reported `liquidity`. `token_overview` is the live
+snapshot every chain exposes, so the gate stops comparing a live overview figure
+against a stale OHLC close (the mismatch this revision fixes); `liquidity/latest`
+(`POST /defi/v3/liquidity/latest/token`, Solana only) adds live exit liquidity.
+When the OHLC close is the fallback, the gate block carries
+`liquidity_source` / `exit_liquidity_source` = `"ohlc_close"` and
+`ohlc_age_seconds` (seconds between the last bar and the request), so the renderer
+labels the depth as stale instead of treating it as current.
 
 | Parameter | Value |
 |---|---:|
@@ -147,6 +161,38 @@ reported `liquidity`.
 | `HOLDER_GATE_G1` | 0.90 |
 
 `is_risky` is `true` when the combined gate drops below `0.5`.
+
+## Liquidity health label — `DYING` / `DEAD`
+
+Independent of the score: a token can still trend while its pool is being pulled
+dry. `liquidity_health` reports the pool state and never changes the score.
+
+```
+dd    = liq_drawdown_1h_pct          # peak-to-trough liquidity move in the last hour
+depth = min(liquidity, exit_liquidity)   # thinner reported pool binds
+
+DEAD   if dd >= 99 %   OR   depth < USD 10              # red badge, shown first
+DYING  elif dd >= 80 %                                  # amber badge
+else   LIQ_OK                                           # no label
+```
+
+| field | value |
+|---|---|
+| `code` | `LIQ_OK` / `LIQ_DYING` / `LIQ_DEAD` |
+| `label` | `null` / `DYING` / `DEAD` |
+| `tone` / `color` | `neutral` / `warn` (`#f59e0b`) / `bad` (`#ef4444`) |
+| `drawdown_pct` | liquidity drawdown used |
+| `depth_usd` | thinner pool used |
+| `reason` | human-readable cause |
+
+| Parameter | Value |
+|---|---:|
+| `LIQ_HEALTH_DYING_DD` | 80 |
+| `LIQ_HEALTH_DEAD_DD` | 99 |
+| `LIQ_HEALTH_DEAD_USD` | 10 |
+
+The badge is rendered first in the header badge row (before the junk-gate badge)
+and is surfaced in every format (`ui`, `plain`, `telegram`, `json`).
 
 ---
 
@@ -165,9 +211,10 @@ Per interval the response exposes:
 At the top level the response exposes:
 
 - `is_risky` — `true` when the combined gate drops below `0.5`
+- `liquidity_health` — `{ code, label, tone, color, drawdown_pct, depth_usd, reason }`
 - `gates.weights` — `{ security, liquidity, holder }`
 - `gates.security` — `{ multiplier, reason, score }`
-- `gates.liquidity` — `{ multiplier, reason, effective_liquidity, used_exit_liquidity, liquidity, exit_liquidity }`
+- `gates.liquidity` — `{ multiplier, reason, effective_liquidity, used_exit_liquidity, liquidity, exit_liquidity, liquidity_source, exit_liquidity_source, ohlc_age_seconds }`
 - `gates.holder` — `{ multiplier, reason, holder_count }`
 - `gates.combined_multiplier`
 - `gates.reason` — `weighted_gate` or `honeypot_hard_stop`
@@ -195,11 +242,12 @@ Extra interval fields in `hybrid`:
 | Creation time | `/defi/token_creation_info` | 35 |
 | OHLCV 1m | `/defi/v3/ohlcv` | 25–100 |
 | Liquidity OHLC (+ exit liquidity) | `/defi/v3/liquidity/ohlc/token` | 20 |
+| Liquidity latest (current total + exit, Solana) | `/defi/v3/liquidity/latest/token` | 5 (`ceil(5·n^0.8)`) |
 | Token overview | `/defi/token_overview` | 21 |
 | Holder chart | `/token/v1/holder/chart` | 30 |
 | Holder profile | `/token/v1/holder-profile` | 21 |
 | Token security | `/defi/token_security` | 30 |
-| Typical total | | `~171` to `~257` depending on OHLCV cost |
+| Typical total | | `~176` to `~262` depending on OHLCV cost (Solana adds the 5 CU liquidity snapshot) |
 
 `hybrid` does **not** add new API calls beyond `classic`; it only changes the
 scoring logic.

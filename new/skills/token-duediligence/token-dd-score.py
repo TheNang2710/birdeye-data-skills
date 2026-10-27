@@ -583,6 +583,20 @@ def fetch_liquidity_ohlc(api, address, resolution="15m", count=96):
     return _normalize_liquidity_ohlc(items or [], resolution=resolution, count=count)
 
 
+def fetch_liquidity_latest(api, address):
+    """Live total / exit / stable liquidity + price for one Solana token.
+
+    `POST /defi/v3/liquidity/latest/token` (Solana only, CU = ceil(5 * n^0.8)).
+    Unlike the OHLC endpoint this is a true snapshot, so the *current* liquidity
+    no longer has to be inferred from the last bar close.
+    """
+    d = api.post("/defi/v3/liquidity/latest/token", {"addresses": [address]}, 5) or {}
+    items = d.get("items") if isinstance(d, dict) else d
+    if isinstance(items, list) and items and isinstance(items[0], dict):
+        return items[0]
+    return {}
+
+
 # ===========================================================================
 # overview accessors
 # ===========================================================================
@@ -739,18 +753,6 @@ def _liquidity_changes_from_candles(candles, resolution, frames):
     return out
 
 
-def _liquidity_current_from_candles(candles):
-    candles = _effective_liquidity_candles(candles)
-    vals = []
-    for c in candles or []:
-        if not isinstance(c, dict):
-            continue
-        v = _f(c.get("close_liquidity_usd"))
-        if v is not None:
-            vals.append(v)
-    return vals[-1] if vals else None
-
-
 def _effective_liquidity_candles(candles):
     rows = [c for c in (candles or []) if isinstance(c, dict)]
     if not rows:
@@ -763,6 +765,84 @@ def _effective_liquidity_candles(candles):
             start = i
             break
     return rows[start:]
+
+
+def _ohlc_last(candles, key):
+    """Last non-null numeric value for `key` in an ordered candle list."""
+    out = None
+    for c in candles or []:
+        if not isinstance(c, dict):
+            continue
+        v = _f(c.get(key))
+        if v is not None:
+            out = v
+    return out
+
+
+def _last_candle_age_seconds(candles, resolution, request_time):
+    """Seconds between the last OHLC bar close and the request time.
+
+    Liquidity OHLC timestamps mark the bar *open*, so the close is one step
+    later. Returns None when the timestamps are missing.
+    """
+    rows = [c for c in (candles or []) if isinstance(c, dict)]
+    if not rows:
+        return None
+    ts = _candle_unix_ts(rows[-1])
+    if ts is None:
+        return None
+    step_sec = (_frame_minutes(resolution) or 15) * 60
+    return max(0, int(int(request_time or time.time()) - (int(ts) + step_sec)))
+
+
+def _liq_snapshot(ovd, latest, candles, resolution="15m", request_time=None):
+    """Resolve the *current* liquidity + exit liquidity for the score and UI.
+
+    Total liquidity : token_overview.liquidity -> liquidity/latest -> OHLC close
+    Exit liquidity  : liquidity/latest.exit_liquidity_usd -> OHLC close
+
+    `token_overview` is the live snapshot every chain exposes, so the score stops
+    comparing a live overview figure against a stale OHLC close. `liquidity/latest`
+    adds live exit liquidity on Solana. The OHLC bar close is only a fallback and,
+    when used, its staleness (seconds before the request) is recorded so the UI can
+    label the value "N s/m ago (OHLC close)" instead of presenting it as live.
+    """
+    req = int(request_time or time.time())
+    latest = latest or {}
+    ov_liq = _f((ovd or {}).get("liquidity"))
+    snap_liq = _f(latest.get("liquidity_usd"))
+    snap_exit = _f(latest.get("exit_liquidity_usd"))
+    rows = _effective_liquidity_candles(candles)
+    ohlc_liq = _ohlc_last(rows, "close_liquidity_usd")
+    ohlc_exit = _ohlc_last(rows, "close_exit_liquidity_usd")
+    age = _last_candle_age_seconds(rows, resolution, req)
+
+    if ov_liq is not None:
+        liq, liq_src = ov_liq, "token_overview"
+    elif snap_liq is not None:
+        liq, liq_src = snap_liq, "liquidity/latest"
+    elif ohlc_liq is not None:
+        liq, liq_src = ohlc_liq, "ohlc_close"
+    else:
+        liq, liq_src = None, None
+
+    if snap_exit is not None:
+        ex, ex_src = snap_exit, "liquidity/latest"
+    elif ohlc_exit is not None:
+        ex, ex_src = ohlc_exit, "ohlc_close"
+    else:
+        ex, ex_src = None, None
+
+    return {
+        "liquidity": liq,
+        "liquidity_source": liq_src,
+        "liquidity_age_seconds": age if liq_src == "ohlc_close" else None,
+        "exit_liquidity": ex,
+        "exit_liquidity_source": ex_src,
+        "exit_liquidity_age_seconds": age if ex_src == "ohlc_close" else None,
+        "stable_liquidity": _f(latest.get("stable_liquidity_usd")),
+        "request_time": req,
+    }
 
 
 def _merge_money_flow_maps(primary, fallback):
@@ -788,7 +868,7 @@ def frames_coverage(ovd):
     return got
 
 
-def _flow_block(ovd, candles=None, liq_resolution="15m"):
+def _flow_block(ovd, candles=None, liq_resolution="15m", liq_snapshot=None):
     """Price change + money flow per frame, straight from the overview payload.
 
     `moneyFlow[]` is a (frame × tag) grid where tag splits the flow by cohort —
@@ -846,6 +926,7 @@ def _flow_block(ovd, candles=None, liq_resolution="15m"):
     ovd["_trade_change_pct"] = trade_change
     ovd["_liq_change_pct"] = liq_change
     order = _MF_TAGS + [t for t in by_tag if t not in _MF_TAGS]
+    snap = liq_snapshot or _liq_snapshot(ovd, None, candles, liq_resolution)
     return {
         "key_intervals": UI_KEY_FRAMES,
         "price_change_pct": {f: pc_get(ovd, f) for f in FRAMES},
@@ -853,7 +934,12 @@ def _flow_block(ovd, candles=None, liq_resolution="15m"):
         "wallet_change_pct": wallet_change,
         "trade_change_pct": trade_change,
         "liquidity_change_pct": liq_change,
-        "liquidity_now": _liquidity_current_from_candles(candles),
+        "liquidity_now": snap["liquidity"],
+        "liquidity_now_source": snap["liquidity_source"],
+        "liquidity_now_age_seconds": snap["liquidity_age_seconds"],
+        "exit_liquidity_now": snap["exit_liquidity"],
+        "exit_liquidity_now_source": snap["exit_liquidity_source"],
+        "exit_liquidity_now_age_seconds": snap["exit_liquidity_age_seconds"],
         "volume_value": {f: ov_get(ovd, "v", f) for f in FRAMES},
         "wallet_value": {f: ov_get(ovd, "uniqueWallet", f) for f in FRAMES},
         "trade_value": {f: trade_count_get(ovd, f) for f in FRAMES},
@@ -1294,7 +1380,7 @@ def score_activity(ovd, pace_on=False):
 # PILLAR 4 — Liquidity (depth / stability / valuation / trend / pairs)
 # ===========================================================================
 
-def score_liquidity(ovd, candles, resolution="15m"):
+def score_liquidity(ovd, candles, resolution="15m", latest=None, request_time=None):
     bd = []
     sub = {}
 
@@ -1303,7 +1389,6 @@ def score_liquidity(ovd, candles, resolution="15m"):
         bd.append({"name": name, "score": None if score is None else _r1(score),
                    "weight": SUB_W["liquidity"][name], "detail": detail})
 
-    liq = _f(ovd.get("liquidity"))
     mc = _f(ovd.get("marketCap"))
 
     rows = _effective_liquidity_candles(candles)
@@ -1321,8 +1406,11 @@ def score_liquidity(ovd, candles, resolution="15m"):
         if p is not None:
             pairs.append(p)
 
-    liq_now = closes[-1] if closes else liq
-    exit_now = exits[-1] if exits else None
+    # `current` comes from the live snapshot (overview / liquidity-latest); the
+    # OHLC series is only used for the time-series reads below (stability, trend).
+    snap = _liq_snapshot(ovd, latest, candles, resolution, request_time)
+    liq_now = snap["liquidity"]
+    exit_now = snap["exit_liquidity"]
 
     # --- depth -----------------------------------------------------------
     depth = []
@@ -1403,7 +1491,7 @@ def score_liquidity(ovd, candles, resolution="15m"):
         }
     return {"score": None if score is None else _r1(score), "coverage": round(coverage, 3),
             "breakdown": bd, "stats": stats, "liq_now": liq_now, "exit_now": exit_now,
-            "hard_blocks": []}
+            "snapshot": snap, "hard_blocks": []}
 
 
 GATE_LIQ_MAX_PENALTY = 0.10   # liquidity drawdown can cost at most 10 % of the total
@@ -1458,6 +1546,56 @@ def liquidity_gate(liquidity_stats=None):
         "binding": binding,
         "holder_change_penalty": None,        # reserved for multi-interval holder change
     }
+
+
+# --- liquidity health labels (independent of the score) ----------------------
+# A pool can legitimately score ~30/100 (band E) while the exit side has been
+# pulled dry. These labels exist to say that plainly; they never change the
+# score, they only override the verdict rendering with an explicit warning.
+LIQ_HEALTH_DYING_DD = 0.80    # >= 80 % below the window peak — bleeding out
+LIQ_HEALTH_DEAD_DD = 0.99     # >= 99 % below the peak — drained
+LIQ_HEALTH_DEAD_USD = 10.0    # either pool below 10 USD — unsellable
+
+
+def liquidity_health(gate_detail=None, liq_now=None, exit_now=None):
+    """Post-score liquidity health label — `DYING` / `DEAD` — decoupled from the score.
+
+    The gate already discounts the score for deterioration, but a modest discount is
+    not enough to communicate that the pool is (nearly) gone. This label is emitted
+    regardless of the score so a token sitting at ~30/100 can still be flagged DEAD.
+
+    DEAD  -> drawdown >= 99 %, or either pool below 10 USD (unsellable).
+    DYING -> drawdown in [80 %, 99 %).
+    Otherwise LIQ_OK (no label rendered).
+
+    Worst-of is used on both axes: the deepest drawdown between total and exit
+    liquidity, and the thinner of the two pools (`min`, matching the exit-liquidity
+    convention used elsewhere — the sell side is what actually binds).
+    """
+    g = gate_detail or {}
+    dds = [d for d in (g.get("liquidity_drawdown_pct"), g.get("exit_drawdown_pct"))
+           if isinstance(d, (int, float))]
+    dd = max(dds) if dds else None
+    depths = [d for d in (liq_now, exit_now) if isinstance(d, (int, float))]
+    depth = min(depths) if depths else None
+
+    thin = depth is not None and depth < LIQ_HEALTH_DEAD_USD
+    if thin or (dd is not None and dd >= LIQ_HEALTH_DEAD_DD * 100.0):
+        reason = (f"pool {_fmt_usd(depth)} below the 10 USD floor — unsellable" if thin
+                  else f"liquidity down {dd:.1f}% from peak — pool drained")
+        return {"code": "LIQ_DEAD", "label": "DEAD", "tone": "bad", "color": "#ef4444",
+                "drawdown_pct": _r1(dd) if dd is not None else None,
+                "depth_usd": _r1(depth) if depth is not None else None,
+                "reason": reason}
+    if dd is not None and dd >= LIQ_HEALTH_DYING_DD * 100.0:
+        return {"code": "LIQ_DYING", "label": "DYING", "tone": "warn", "color": "#f59e0b",
+                "drawdown_pct": _r1(dd),
+                "depth_usd": _r1(depth) if depth is not None else None,
+                "reason": f"liquidity down {dd:.1f}% from peak — bleeding out"}
+    return {"code": "LIQ_OK", "label": None, "tone": "neutral", "color": None,
+            "drawdown_pct": _r1(dd) if dd is not None else None,
+            "depth_usd": _r1(depth) if depth is not None else None,
+            "reason": None}
 
 
 # ===========================================================================
@@ -1783,19 +1921,22 @@ def compose(pillars, mode, preset="default", chain="sol"):
         weights.pop("smart_money", None)
     weights, applied_shift = apply_chain_weight_shift(weights, chain)
 
+    liq = pillars.get("liquidity") or {}
+    gate, gate_detail = liquidity_gate(liq.get("stats"))
+    health = liquidity_health(gate_detail, liq.get("liq_now"), liq.get("exit_now"))
+
     avail = {k: v for k, v in weights.items()
              if isinstance(pillars.get(k), dict) and pillars[k].get("score") is not None}
     wsum = sum(avail.values())
     if wsum <= 0:
         return {"final": 0.0, "rating": "F", "verdict": RATING_VERDICT["F"],
-                "gate": 0.0, "gate_detail": {}, "weights_used": {}, "pillar_points": {},
+                "gate": 0.0, "gate_detail": {}, "liquidity_health": health,
+                "weights_used": {}, "pillar_points": {},
                 "weights_declared": weights, "applied_shift": applied_shift}
 
     norm = {k: v / wsum for k, v in avail.items()}
     base = sum(norm[k] * pillars[k]["score"] for k in norm)
 
-    liq = pillars.get("liquidity") or {}
-    gate, gate_detail = liquidity_gate(liq.get("stats"))
     final = base * gate
     r = rating_of(final)
     return {
@@ -1805,6 +1946,7 @@ def compose(pillars, mode, preset="default", chain="sol"):
         "verdict": RATING_VERDICT[r],
         "gate": round(gate, 3),
         "gate_detail": gate_detail,
+        "liquidity_health": health,
         "weights_used": {k: round(v, 4) for k, v in norm.items()},
         "weights_declared": weights,
         "applied_shift": applied_shift,
@@ -1844,6 +1986,14 @@ def _mode_plan(args, chain):
         skips.append(("top_holders", "standard mode"))
         skips.append(("token_money_flow", "standard mode"))
         skips.append(("liquidity_ohlc", "standard mode"))
+    # Live liquidity snapshot (Solana only) — the cheap way to get *current* total
+    # and exit liquidity for both modes instead of reading the last OHLC close.
+    if "liq" in skip or "liquidity" in skip:
+        skips.append(("liquidity_latest", "skipped by --skip"))
+    elif not sol:
+        skips.append(("liquidity_latest", "Solana only — CU refunded"))
+    else:
+        plan.append("liquidity_latest")
     return plan, skips
 
 
@@ -1858,6 +2008,7 @@ def analyze(args, emit=print):
 
     api = Api(key, chain)
     warm = getattr(args, "_warm_errors", None) or []
+    request_time = int(time.time())
 
     plan, skips = _mode_plan(args, chain)
     raw = {}
@@ -1900,9 +2051,14 @@ def analyze(args, emit=print):
                                                 getattr(args, "liq_resolution", "15m") or "15m",
                                                 getattr(args, "liq_candles", 96) or 96)) or []
     raw["liquidity_ohlc"] = candles
+    liq_latest = step("liquidity_latest",
+                      lambda: fetch_liquidity_latest(api, address)) or {}
+    raw["liquidity_latest"] = liq_latest
+    liq_resolution = getattr(args, "liq_resolution", "15m") or "15m"
+    liq_snapshot = _liq_snapshot(ovd, liq_latest, candles, liq_resolution, request_time)
     # money flow: net + buy/sell volume per frame (same overview call)
     # plus volume/wallet/liquidity change summaries for the renderer/momentum.
-    flow = _flow_block(ovd, candles, getattr(args, "liq_resolution", "15m") or "15m")
+    flow = _flow_block(ovd, candles, liq_resolution, liq_snapshot)
     flow["money_flow"] = _merge_money_flow_maps(flow.get("money_flow"), _money_flow_map(token_money_flow))
 
     # ---------------- score ----------------
@@ -1911,8 +2067,8 @@ def analyze(args, emit=print):
         "security": score_security(secd, ovd, address, chain),
         "holders": score_holders(conc, ovd, profile, top_holders),
         "activity": score_activity(ovd, pace_on=bool(getattr(args, "pace", False))),
-        "liquidity": score_liquidity(ovd, candles,
-                                     getattr(args, "liq_resolution", "15m") or "15m"),
+        "liquidity": score_liquidity(ovd, candles, liq_resolution,
+                                     liq_latest, request_time),
         "smart_money": score_smart_money(token_money_flow, top_holders, conc, ovd, profile),
     }
     if mode == "standard":
@@ -1931,14 +2087,15 @@ def analyze(args, emit=print):
 
     # ---------------- CU bookkeeping ----------------
     cost = {"overview": 21, "security": 30, "distribution": 30, "holder_profile": 30,
-            "top_holders": 30, "token_money_flow": 10, "liquidity_ohlc": 30}
+            "top_holders": 30, "token_money_flow": 10, "liquidity_ohlc": 30,
+            "liquidity_latest": 5}
     cu = {"base": 0, "list": 0, "advanced_security": 0, "risk_history": 0,
           "refunded_rollback": 0}
     cu["base"] = cost["overview"] + cost["security"]
     for name in plan:
         if name in ("distribution", "holder_profile", "top_holders"):
             cu["list"] += cost[name]
-        elif name in ("token_money_flow", "liquidity_ohlc"):
+        elif name in ("token_money_flow", "liquidity_ohlc", "liquidity_latest"):
             cu["advanced_security"] += cost[name]
         elif name == "security":
             cu["base"] += cost["security"]
@@ -1952,7 +2109,7 @@ def analyze(args, emit=print):
     # ---------------- coverage caveats ----------------
     caveats = []
     if mode == "standard":
-        caveats.append("standard mode: cohorts/snipers, exit-liquidity, liquidity stability "
+        caveats.append("standard mode: cohorts/snipers, liquidity stability "
                        "and smart-money are NOT measured — score is not comparable to advanced")
     for name, reason in skips:
         if "refund" in reason or "skipped" in reason:
@@ -1985,6 +2142,7 @@ def analyze(args, emit=print):
         "holder_top": conc,
         "holder_cohorts": (pillars["holders"] or {}).get("cohorts", {}),
         "liquidity_stats": (pillars["liquidity"] or {}).get("stats"),
+        "liquidity_snapshot": (pillars["liquidity"] or {}).get("snapshot"),
         "smart_money_signals": (pillars["smart_money"] or {}).get("signals", {}),
     }
     ext = (ovd.get("extensions") if isinstance(ovd, dict) else {}) or {}
@@ -2024,6 +2182,7 @@ def analyze(args, emit=print):
             "verdict": comp["verdict"],
             "gate": comp["gate"],
             "gate_detail": comp["gate_detail"],
+            "liquidity_health": comp.get("liquidity_health"),
             "weights_used": comp["weights_used"],
             "pillar_points": comp.get("pillar_points", {}),
             "hard_blocked": comp.get("hard_blocked", False),
@@ -2190,6 +2349,9 @@ def render_plain(res):
         f"gate: {s['gate']:.3f}",
         f"binding_gate: {s['gate_detail'].get('binding')}",
     ]
+    health = s.get("liquidity_health") or {}
+    if health.get("label"):
+        L.append(f"liquidity_health: {health['label']} ({health.get('reason')})")
     gd = s["gate_detail"]
     if gd.get("liquidity_drawdown_pct") is not None:
         L.append(f"liquidity_drawdown_pct: {gd.get('liquidity_drawdown_pct')}")
@@ -2203,7 +2365,9 @@ def render_plain(res):
         f"market.market_cap_usd: {_fmt_usd(mk['market_cap_usd'])}",
         f"market.fdv_usd: {_fmt_usd(mk['fdv_usd'])}",
         f"market.liquidity_usd: {_fmt_usd(mk['liquidity_usd'])}",
+        f"market.liquidity_source: {(res.get('flow') or {}).get('liquidity_now_source') or 'N/A'}",
         f"market.exit_liquidity_usd: {_fmt_usd(mk['exit_liquidity_usd'])}",
+        f"market.exit_liquidity_source: {(res.get('flow') or {}).get('exit_liquidity_now_source') or 'N/A'}",
         f"market.volume_24h_usd: {_fmt_usd(mk['volume_24h_usd'])}",
         f"market.holders: {_num(mk['holders'],0)}",
         f"market.trades_24h: {_num(mk['trades_24h'],0)}",
@@ -2267,10 +2431,14 @@ def render_plain(res):
 
 def render_telegram(res):
     m, s, mk = res["meta"], res["score"], res["market"]
+    health = s.get("liquidity_health") or {}
     L = [f"*TOKEN DUE-DILIGENCE SCORE* · `{m.get('symbol') or '?'}` · {m['chain']} · {m['mode']}",
          f"`{m['address']}`",
          f"*FINAL {s['final']:.1f}/100  →  {s['rating']}*  {s['verdict']}",
          f"base {s['base_before_gate']:.1f} × gate {s['gate']:.2f}", ""]
+    if health.get("label"):
+        mark = "🔴" if health["code"] == "LIQ_DEAD" else "🟠"
+        L.insert(3, f"{mark} *LIQUIDITY {health['label']}* — {health.get('reason')}")
     L.append("```")
     L.append(f"{'PILLAR':<12}{'SCORE':>7}{'WT':>7}")
     for k in PILLAR_ORDER:
@@ -2590,7 +2758,7 @@ def _dd_liquidity_now(res):
     if v is not None:
         return v
     stats = res.get("liquidity_stats") or {}
-    v = _f(stats.get("current"))
+    v = _f((stats.get("liquidity") or {}).get("current"))
     if v is not None:
         return v
     return _f((res.get("market") or {}).get("liquidity_usd"))
@@ -2753,9 +2921,19 @@ def _dd_holder_detail_panel(res):
 def render_html(res):
     m, s, mk = res["meta"], res["score"], res["market"]
     rating = s.get("rating") or "?"
+    health = s.get("liquidity_health") or {}
     final = s.get("final")
     fcolor = _RATING_COLOR.get(rating, "#64748b")
     ftone = _dd_tone(final)
+    if health.get("label"):
+        _hbg, _hfg, _hbd, _hc = _DD_TONE.get(health.get("tone") or "bad", _DD_TONE["bad"])
+        health_chip = (
+            f'<div title="{_html.escape(str(health.get("reason") or ""), quote=True)}" '
+            f'style="background:{_hbg};border:1px solid {_hbd};border-radius:999px;padding:3px 9px;'
+            f'font-size:10.5px;color:{_hfg}">Liquidity: '
+            f'<span style="font-weight:700">{_html.escape(str(health["label"]))}</span></div>')
+    else:
+        health_chip = ""
     symbol = str(m.get("symbol") or "?")
     name = str(m.get("name") or "")
     overview = ((res.get("inputs") or {}).get("overview")
@@ -2830,7 +3008,7 @@ def render_html(res):
         f'<div style="font-size:30px;font-weight:900;color:{fcolor};line-height:1.1">'
         f'{f"{final:.1f}" if isinstance(final, (int, float)) else "N/A"}'
         f'<span style="font-size:14px;color:#64748b">/100</span></div>'
-        f'<div style="margin-top:5px;display:flex;justify-content:flex-end">{_dd_chip("Rating", rating, ftone)}</div>'
+        f'<div style="margin-top:5px;display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap">{health_chip}{_dd_chip("Rating", rating, ftone)}</div>'
         f'</div></div></div>')
 
     flow = res.get("flow") or {}
@@ -2850,6 +3028,34 @@ def render_html(res):
             return ""
         return f'% change: {_dd_signed(delta)}'
 
+    def _age_note(seconds):
+        if seconds is None:
+            return ""
+        s = int(seconds)
+        if s < 90:
+            return f"{s}s ago"
+        if s < 5400:
+            return f"{int(round(s / 60))}m ago"
+        return f"{s / 3600:.1f}h ago"
+
+    # A live snapshot (overview / liquidity-latest) needs no caveat; when the
+    # fallback OHLC bar close is used, label it with how stale it is.
+    def _stale_note(source, age_seconds):
+        return f"{_age_note(age_seconds)} (OHLC close)" if source == "ohlc_close" else ""
+
+    liq_stale = _stale_note(flow.get("liquidity_now_source"),
+                            flow.get("liquidity_now_age_seconds"))
+    ex_stale = _stale_note(flow.get("exit_liquidity_now_source"),
+                           flow.get("exit_liquidity_now_age_seconds"))
+
+    def _liq_sub(frame, stale_note):
+        bits = []
+        if frame:
+            bits.append(f"% change: {_dd_signed(liquidity_change.get(frame))}")
+        if stale_note:
+            bits.append(stale_note)
+        return " · ".join(bits)
+
     def _stats_dynamic_tiles_for(frame):
         volume_label = "Volume"
         trades_label = "Trades"
@@ -2862,7 +3068,7 @@ def render_html(res):
             _dd_tile_html_sub("Price", _fmt_usd(mk.get("price_usd")),
                               _frame_sub(frame, price_change.get(frame), frame)),
             _dd_tile_html_sub("Liquidity", _fmt_usd(liq_now),
-                              _frame_sub(frame, liquidity_change.get(frame), frame)),
+                              _liq_sub(frame, liq_stale)),
             _dd_tile_html_sub(volume_label, _fmt_usd(volume_val),
                               _frame_sub(frame, volume_change.get(frame), frame)),
             _dd_tile_html_sub(trades_label, _num(trades_val, 0),
@@ -2873,7 +3079,7 @@ def render_html(res):
 
     static_tiles = "".join([
         _dd_tile("MCap", _fmt_usd(mk.get("market_cap_usd"))),
-        _dd_tile("Exit Liquidity", _fmt_usd(mk.get("exit_liquidity_usd"))),
+        _dd_tile("Exit Liquidity", _fmt_usd(mk.get("exit_liquidity_usd")), ex_stale or None),
         _dd_tile("Holders", _num(mk.get("holders"), 0)),
         _dd_tile("FDV", _fmt_usd(mk.get("fdv_usd"))),
     ])
@@ -2910,6 +3116,10 @@ def render_html(res):
         _dd_chip("Binding", str(gate.get("binding") or "—")),
         _dd_chip("Mode", str(m.get("mode") or "—")),
     ]
+    if health.get("label"):
+        # DEAD / DYING overrides the verdict visually — it is emitted even when the
+        # score is still non-zero (e.g. ~30/100, band E).
+        chips.insert(0, _dd_chip("Liquidity", health["label"], health.get("tone") or "bad"))
     if s.get("hard_blocked"):
         chips.append(_dd_chip("Hard block", "score forced to 0", "bad"))
     chips_html = "".join(chips)
@@ -3189,8 +3399,8 @@ def add_parser(sub, chains=None):
     p = sub.add_parser(
         "token-dd-score",
         help=f"Skill #24 — Token Due-Diligence Score 0-100 + rating A+..F. "
-             f"standard = token_overview + token_security (51 CU); "
-             f"advanced = + distribution/profile/top-holders/money-flow/liquidity-OHLC (~181 CU).",
+             f"standard = token_overview + token_security + live liquidity snapshot (56 CU); "
+             f"advanced = + distribution/profile/top-holders/money-flow/liquidity-OHLC (~186 CU).",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         description=(
             "5 weighted pillars (Security / Holders / Activity / Liquidity / Smart Money),\n"
@@ -3201,7 +3411,7 @@ def add_parser(sub, chains=None):
     p.add_argument("--chain", choices=chain_ids, default="sol")
     p.add_argument("--address", required=True, help="Token contract / mint address")
     p.add_argument("--mode", choices=["standard", "advanced"], default="standard",
-                   help="standard = 2 APIs (51 CU). advanced = all pillars (~181 CU).")
+                   help="standard = overview + security + live liquidity snapshot (56 CU). advanced = all pillars (~186 CU).")
     p.add_argument("--top-n", dest="top_n", type=int, default=20, choices=[10, 20, 50],
                    help="Holder rows requested from /holder/v1/distribution (advanced).")
     p.add_argument("--liq-resolution", dest="liq_resolution",
@@ -3280,8 +3490,14 @@ def _rescore(prev, args):
     top_holders = inputs.get("top_holders") or {}
     token_money_flow = inputs.get("token_money_flow") or inputs.get("smart_money") or {}
     candles = inputs.get("liquidity_ohlc") or []
+    liq_latest = inputs.get("liquidity_latest") or {}
+    liq_resolution = getattr(args, "liq_resolution", "15m") or "15m"
+    # Reuse the stored snapshot so a 0-CU re-score keeps the original "current"
+    # value (and its OHLC staleness) instead of drifting with wall-clock time.
+    liq_snapshot = ((prev.get("derived_data") or {}).get("liquidity_snapshot")
+                    or _liq_snapshot(ovd, liq_latest, candles, liq_resolution))
 
-    flow = _flow_block(ovd, candles, getattr(args, "liq_resolution", "15m") or "15m")
+    flow = _flow_block(ovd, candles, liq_resolution, liq_snapshot)
     flow["money_flow"] = _merge_money_flow_maps(flow.get("money_flow"), _money_flow_map(token_money_flow))
 
     mode = getattr(args, "mode", None) or prev["meta"]["mode"]
@@ -3290,8 +3506,8 @@ def _rescore(prev, args):
         "security": score_security(secd, ovd, prev["meta"]["address"], prev["meta"]["chain"]),
         "holders": score_holders(conc, ovd, profile, top_holders),
         "activity": score_activity(ovd, pace_on=bool(getattr(args, "pace", False))),
-        "liquidity": score_liquidity(ovd, candles,
-                                     getattr(args, "liq_resolution", "15m") or "15m"),
+        "liquidity": score_liquidity(ovd, candles, liq_resolution,
+                                     liq_latest, liq_snapshot.get("request_time")),
         "smart_money": score_smart_money(token_money_flow, top_holders, conc, ovd, profile),
     }
     if mode == "standard":
@@ -3311,7 +3527,8 @@ def _rescore(prev, args):
     out["score"] = {
         "final": comp["final"], "base_before_gate": comp.get("base_before_gate"),
         "rating": comp["rating"], "verdict": comp["verdict"], "gate": comp["gate"],
-        "gate_detail": comp["gate_detail"], "weights_used": comp["weights_used"],
+        "gate_detail": comp["gate_detail"], "liquidity_health": comp.get("liquidity_health"),
+        "weights_used": comp["weights_used"],
         "pillar_points": comp.get("pillar_points", {}), "hard_blocked": False,
     }
     out["pillars"] = {k: {"score": (pillars[k] or {}).get("score"),
@@ -3324,6 +3541,7 @@ def _rescore(prev, args):
     out["flow"] = flow
     out["smart_money_signals"] = (pillars["smart_money"] or {}).get("signals", {})
     out["market"]["liquidity_usd"] = _f(flow.get("liquidity_now")) or _f(out.get("market", {}).get("liquidity_usd"))
+    out["market"]["exit_liquidity_usd"] = (pillars["liquidity"] or {}).get("exit_now")
     out["raw_data"] = inputs
     out["inputs"] = inputs
     out["derived_data"] = {
@@ -3332,6 +3550,7 @@ def _rescore(prev, args):
         "holder_top": out.get("holder_top"),
         "holder_cohorts": out.get("holder_cohorts"),
         "liquidity_stats": out.get("liquidity_stats"),
+        "liquidity_snapshot": (pillars["liquidity"] or {}).get("snapshot"),
         "smart_money_signals": out.get("smart_money_signals"),
     }
     return out

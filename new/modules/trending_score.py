@@ -136,6 +136,48 @@ HOLDER_GATE_G1 = 0.90
 # Chains where exit liquidity is a meaningful, separately-reported depth.
 EXIT_LIQ_CHAINS = {"sol", "solana"}
 
+# Liquidity health label — independent of the score. A token can still trend while
+# its pool is being pulled; these labels say so plainly and never change the score.
+LIQ_HEALTH_DYING_DD = 80.0    # >= 80 % peak-to-trough liquidity drawdown — bleeding out
+LIQ_HEALTH_DEAD_DD = 99.0     # >= 99 % drawdown — drained
+LIQ_HEALTH_DEAD_USD = 10.0    # either pool below 10 USD — unsellable
+
+
+def liquidity_health_label(liq_info: dict | None, liquidity_bd: dict | None) -> dict:
+    """Post-score liquidity health label — `DYING` / `DEAD` — decoupled from the score.
+
+    DEAD  -> drawdown >= 99 %, or either pool below 10 USD (unsellable).
+    DYING -> drawdown in [80 %, 99 %).
+    Otherwise LIQ_OK (no label rendered).
+
+    Drawdown is the liquidity component's `liq_drawdown_1h_pct`; depth is the
+    thinner of `liquidity` and the separately-reported `exit_liquidity`.
+    """
+    info = liq_info or {}
+    bd = liquidity_bd or {}
+    dd = _to_float(bd.get("liq_drawdown_1h_pct"))
+    depths = [d for d in (_to_float(info.get("liquidity")),
+                          _to_float(info.get("exit_liquidity"))) if d is not None]
+    depth = min(depths) if depths else None
+
+    thin = depth is not None and depth < LIQ_HEALTH_DEAD_USD
+    if thin or (dd is not None and dd >= LIQ_HEALTH_DEAD_DD):
+        reason = (f"pool {depth:,.2f} USD below the 10 USD floor — unsellable" if thin
+                  else f"liquidity down {dd:.1f}% — pool drained")
+        return {"code": "LIQ_DEAD", "label": "DEAD", "tone": "bad", "color": "#ef4444",
+                "drawdown_pct": round(dd, 2) if dd is not None else None,
+                "depth_usd": round(depth, 2) if depth is not None else None,
+                "reason": reason}
+    if dd is not None and dd >= LIQ_HEALTH_DYING_DD:
+        return {"code": "LIQ_DYING", "label": "DYING", "tone": "warn", "color": "#f59e0b",
+                "drawdown_pct": round(dd, 2),
+                "depth_usd": round(depth, 2) if depth is not None else None,
+                "reason": f"liquidity down {dd:.1f}% — bleeding out"}
+    return {"code": "LIQ_OK", "label": None, "tone": "neutral", "color": None,
+            "drawdown_pct": round(dd, 2) if dd is not None else None,
+            "depth_usd": round(depth, 2) if depth is not None else None,
+            "reason": None}
+
 
 def _clamp01(x: float) -> float:
     return max(0.0, min(1.0, x))
@@ -209,20 +251,57 @@ def _last_numeric(rows: list[dict] | None, key: str) -> float | None:
 
 
 def effective_liquidity(ovd: dict, liq_rows: list[dict] | None,
-                        chain: str | None) -> dict:
+                        chain: str | None, liq_snapshot: dict | None = None,
+                        now_ts: int | None = None) -> dict:
     """Pick the effective depth used by the liquidity gate.
 
     On Solana (and any chain where it is reported) the realistic sell-side depth
     is the *exit* liquidity, so use `min(liquidity, exit_liquidity)`.
+
+    `current` always prefers a live snapshot — `token_overview.liquidity` for the
+    total and `liquidity/latest` for the exit side — and only falls back to the
+    last liquidity-OHLC row. That keeps the gate from mixing a live overview
+    figure with a stale bar close; when the OHLC fallback is used its staleness
+    (`ohlc_age_seconds`, one bar step back from the request time) is reported.
     """
     ovd = ovd or {}
+    snap = liq_snapshot or {}
     ch = str(chain or "").strip().lower()
-    liq_now = _last_numeric(liq_rows, "liq")
+
+    liq_now = _to_float(ovd.get("liquidity"))
+    liq_src = "token_overview" if liq_now is not None else None
     if liq_now is None:
-        liq_now = _to_float(ovd.get("liquidity"))
-    exit_now = _last_numeric(liq_rows, "exit")
+        liq_now = _to_float(snap.get("liquidity_usd"))
+        if liq_now is not None:
+            liq_src = "liquidity/latest"
+    if liq_now is None:
+        liq_now = _last_numeric(liq_rows, "liq")
+        if liq_now is not None:
+            liq_src = "ohlc_close"
+
+    exit_now = _to_float(snap.get("exit_liquidity_usd"))
+    exit_src = "liquidity/latest" if exit_now is not None else None
     if exit_now is None:
         exit_now = _to_float(ovd.get("exitLiquidity") or ovd.get("exit_liquidity"))
+        if exit_now is not None:
+            exit_src = "token_overview"
+    if exit_now is None:
+        exit_now = _last_numeric(liq_rows, "exit")
+        if exit_now is not None:
+            exit_src = "ohlc_close"
+
+    ohlc_age = None
+    if liq_src == "ohlc_close" or exit_src == "ohlc_close":
+        last_t = None
+        for r in liq_rows or []:
+            if isinstance(r, dict) and r.get("t") is not None:
+                last_t = r.get("t")
+        if last_t is not None:
+            if now_ts is None:
+                import time
+                now_ts = int(time.time())
+            # bars are 1m (liquidity OHLC / history), so the close is one step on
+            ohlc_age = max(0, int(int(now_ts) - (int(last_t) + 60)))
 
     use_exit = ch in EXIT_LIQ_CHAINS and exit_now is not None
     if use_exit and liq_now is not None:
@@ -233,7 +312,10 @@ def effective_liquidity(ovd: dict, liq_rows: list[dict] | None,
         eff = liq_now
     return {
         "liquidity": round(liq_now, 2) if liq_now is not None else None,
+        "liquidity_source": liq_src,
         "exit_liquidity": round(exit_now, 2) if exit_now is not None else None,
+        "exit_liquidity_source": exit_src,
+        "ohlc_age_seconds": ohlc_age,
         "chain": ch or None,
         "used_exit_liquidity": bool(use_exit),
         "effective_liquidity": round(eff, 2) if eff is not None else None,
@@ -1123,6 +1205,7 @@ def _compute_classic_trending_score(
     holder_chart: list[dict],
     holder_profile: dict,
     chain: str | None = None,
+    liq_snapshot: dict | None = None,
 ) -> dict:
     """Original six-component momentum model (security & liquidity also gate)."""
     mcap = _to_float(ovd.get("marketCap") or ovd.get("market_cap"))
@@ -1131,7 +1214,7 @@ def _compute_classic_trending_score(
 
     sec_score, sec_bd = security_score(secd)
     sec_gate, sec_reason = security_gate(sec_score, sec_bd)
-    liq_info = effective_liquidity(ovd, liq_1m, chain)
+    liq_info = effective_liquidity(ovd, liq_1m, chain, liq_snapshot, now_ts)
     liq_gate, liq_reason = liquidity_gate(liq_info.get("effective_liquidity"))
     hol_gate, hol_reason = holder_gate(holder_count)
 
@@ -1181,11 +1264,16 @@ def _compute_classic_trending_score(
               if v.get("trending_score") is not None]
     overall = round(mean(scores), 1) if scores else None
 
+    # `liq_bd` is identical across intervals (same depth series, same now_ts) — reuse
+    # the last one for the health label.
+    liq_health = liquidity_health_label(liq_info, liq_bd)
+
     return {
         "overall_trending_score": overall,
         "intervals": intervals_result,
         "security": sec_bd,
         "is_risky": is_risky,
+        "liquidity_health": liq_health,
         "gates": {
             "weights": dict(GATE_WEIGHTS),
             "security": {"multiplier": round(sec_gate, 4), "reason": sec_reason,
@@ -1228,6 +1316,7 @@ def compute_trending_score(
     holder_profile: dict | None = None,
     model: str = "classic",
     chain: str | None = None,
+    liq_snapshot: dict | None = None,
 ) -> dict:
     """Compute trending scores for all intervals.
 
@@ -1250,7 +1339,7 @@ def compute_trending_score(
         now_ts = int(time.time())
     classic = _compute_classic_trending_score(
         ovd, secd, snapshots, candles_1m, liq_1m, w, now_ts, candles_1s, holder_chart,
-        holder_profile, chain)
+        holder_profile, chain, liq_snapshot)
     classic["model"] = "classic"
     classic["meta"]["hybrid_supported_intervals"] = sorted(HYBRID_INTERVALS)
     if model == "classic":
@@ -1306,6 +1395,7 @@ def compute_trending_score(
         "intervals": intervals_result,
         "security": classic.get("security") or {},
         "is_risky": classic.get("is_risky"),
+        "liquidity_health": classic.get("liquidity_health"),
         "gates": classic.get("gates") or {},
         "weights": w,
         "meta": meta,
