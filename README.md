@@ -13,9 +13,21 @@ contract.
 - **Skills:** `token-dd-score` · `trending-list` · `price-surge` · `wallet-score` ·
   `wallet-style` · `kline-pattern` · `token-trending-score` · `junk-predict`
 
+## Two ways to use
+
+| Path | Best for | How to start |
+|---|---|---|
+| **CLI** (`birdeye-cli`) | terminals, scripts, bots, pipelines | [§1 Install](#1-install) → [§2 API key](#2-get-and-set-the-api-key) → [§3 Run a skill](#3-run-a-skill) |
+| **Local console UI** | point-and-click, no scripting, the web frontend | clone the repo → `./server.sh start` (`python server.py` on Windows) → open <http://127.0.0.1:8765/> · full guide: [docs/local-console.md](docs/local-console.md) |
+
+Both paths share one Birdeye API key and one engine. To set up the CLI, go to
+[§1 Install](#1-install); to run the browser console locally, follow
+[docs/local-console.md](docs/local-console.md).
+
 ## Core Capabilities
 
 - Eight skills behind one command, one credential, one output contract
+- Two entry points over the same engine — the CLI and a local web console ([docs/local-console.md](docs/local-console.md))
 - Pure CLI onboarding: create a Birdeye key on your account, store it once, run anything
 - Five output formats — `plain` · `json` · `telegram` · `raw-json` · `ui` — with `plain`/`json`
   free of HTML, ready for bots and pipelines
