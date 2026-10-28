@@ -22,3 +22,5 @@ docs-local/
 .idea/
 *.swp
 .vercel
+.env*
+!.env.example
