@@ -1,0 +1,20 @@
+# Keep the upload small and free of local/secret state.
+.git/
+.vercel/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.log
+.DS_Store
+.cache/
+.env
+.env.*
+!.env.example
+
+# Local-only tooling / docs (not needed by the deployed functions)
+.claude-plugin/
+docs/
+docs-local/
+server.py
+server.sh
+README.md
