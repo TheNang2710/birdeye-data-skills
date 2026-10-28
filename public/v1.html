@@ -341,7 +341,7 @@ const SKILLS = [
   {id:"trending_score", icon:"📈", name:"Token Trending Score", desc:"0-100 momentum score across 8 intervals", cmd:"token-trending-score", type:"token", cu:"~176", inputs:[
     {k:"chain",label:"Chain",type:"select",opts:CHAINS,def:"sol"},
     {k:"address",label:"Token",type:"text",def:""},
-    {k:"model",label:"Model",type:"select",opts:["classic","hybrid"],def:"classic"},
+    {k:"model",label:"Model",type:"select",opts:["classic","hybrid","momentum_only"],def:"classic"},
     {k:"candles",label:"Candles",type:"text",def:"5000"},
     {k:"nocache",label:"Bypass cache (fresh)",type:"checkbox",def:false},
   ]},
@@ -601,6 +601,7 @@ const FLOW_BY_ID = {
       "Paste the token address and pick the chain",
       "classic mode — OHLCV + liquidity + holders + security only: a 6-component momentum score per interval, no overview wallet/volume frames required",
       "hybrid mode — classic plus the interval-native formula on 1h/4h/24h: 1.0·log10(1+wallets) + 0.5·log10(1+volume) + 0.25·pace_now + 0.25·pace_window + 0.25·tanh(price/25), blended 0.55 native / 0.45 classic (wallets from token_overview; price & candles from OHLCV + overview)",
+      "momentum_only mode — price / volume / liquidity only: holder + security components and gates are dropped and their endpoints are never called",
       "Score 8 intervals (5m … 24h) with momentum-heavy weights: Vol 30 · Swap 15 · Price 25 · Hold 10 · Sec 10 · Liq 10",
       "Apply the junk gate across security, liquidity and holder breadth, then read the overall 0-100 score",
     ],caps:[
@@ -609,7 +610,8 @@ const FLOW_BY_ID = {
       "Each gate scales smoothly as its input improves — a weak read lowers the multiplier rather than tripping a hard cutoff; a gate whose input the chain does not report is left out and the rest renormalised",
       "Liquidity gate uses effective depth — min(liquidity, exit liquidity) where reported; exit liquidity is used on Solana",
       "A confirmed honeypot is the only hard stop (near-zero gate)",
-      "Two models: classic (OHLCV-only, works on any token) and hybrid (adds the wallets / volume / pace native formula on 1h/4h/24h)",
+      "Three models: classic (OHLCV-only, works on any token), hybrid (adds the wallets / volume / pace native formula on 1h/4h/24h) and momentum_only (price / volume / liquidity only)",
+      "momentum_only drops holder + security and renormalises the remaining weights; the junk gate reduces to liquidity only and the holder/security endpoints are not called",
       "Scores 8 intervals — 5m · 15m · 30m · 1h · 4h · 6h · 12h · 24h — so short pumps and sustained trends are separated",
       "Raises ⚠ pipeline_gap when required upstream data is missing instead of silently degrading",
     ],prompt:"Score how strongly this token is trending right now and tell me whether the move is short-lived or sustained."},

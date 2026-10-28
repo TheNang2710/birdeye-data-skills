@@ -156,7 +156,7 @@ reading notes live in [`skills/<name>/SKILL.md`](skills/).
 | `wallet-score` | PnL summary + per-token rug% + first-funded + portfolio | — | 30-110 |
 | `wallet-style` | PnL summary + PnL details + `tx_list` | — | 60-90 |
 | `kline-pattern` | one OHLCV call | — | 25-100 |
-| `token-trending-score` | creation info + OHLCV + liquidity OHLC (+ live snapshot) + overview + holder chart/profile + security | `classic` / `hybrid` | ~176 |
+| `token-trending-score` | creation info + OHLCV + liquidity OHLC (+ live snapshot) + overview + holder chart/profile + security | `classic` / `hybrid` / `momentum_only` | ~176 (~95 in momentum_only) |
 | `junk-predict` | token overview (+ holder distribution) per token | 3 models | 21-51 / token |
 
 Every skill's `SKILL.md` carries its own credential guard, argument table, step flow

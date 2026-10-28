@@ -1,8 +1,9 @@
 # `token-trending-score` — Public Workflow
 
 A **0–100 momentum / trending score per interval** for one token, so short pumps and
-sustained trends are separated. Two models: `classic` (momentum baseline) and `hybrid`
-(adds the wallets / volume / pace interval formula).
+sustained trends are separated. Three models: `classic` (momentum baseline), `hybrid`
+(adds the wallets / volume / pace interval formula) and `momentum_only` (price / volume /
+liquidity only — holder + security dropped and not fetched).
 
 ## High-Level Concept
 
@@ -16,6 +17,9 @@ even when the trending score is still high.
 - `classic` works on any token (momentum baseline).
 - `hybrid` blends in the wallets / volume / pace "attention" formula on `1h` / `4h` / `24h`;
   other intervals fall back to `classic` and are marked `classic_fallback`.
+- `momentum_only` keeps only price / volume / liquidity: the holder and security components
+  **and** their gates are dropped, the remaining weights are renormalised, and the holder /
+  security endpoints are never called — the junk gate reduces to liquidity only.
 - Depth is read from a **live snapshot** (`token_overview` + `POST /defi/v3/liquidity/latest/token`),
   never a stale OHLC close; an OHLC fallback is labelled with its `ohlc_age_seconds`.
 
@@ -28,13 +32,14 @@ even when the trending score is still high.
 | 3 | `GET /defi/v3/liquidity/ohlc/token` | liquidity drawdown series → stability + `liquidity_health` | always | 20 |
 | 4 | `POST /defi/v3/liquidity/latest/token` | live **total + exit** liquidity snapshot | Solana | 5 |
 | 5 | `GET /defi/token_overview` | price, market cap, liquidity, holder count, 24h volume | always | 21 |
-| 6 | `GET /token/v1/holder/chart` | holder growth series — the Holder Dynamics component | always | 30 |
-| 7 | `GET /token/v1/holder-profile` | cohort tags / holder health for Holder Dynamics | always | 21 |
-| 8 | `GET /defi/token_security` | honeypot flag, mint / freeze, tax — the Security component + gate | always | 30 |
+| 6 | `GET /token/v1/holder/chart` | holder growth series — the Holder Dynamics component | `classic` / `hybrid` | 30 |
+| 7 | `GET /token/v1/holder-profile` | cohort tags / holder health for Holder Dynamics | `classic` / `hybrid` | 21 |
+| 8 | `GET /defi/token_security` | honeypot flag, mint / freeze, tax — the Security component + gate | `classic` / `hybrid` | 30 |
 | 9 | — | classify intervals (`native` / `classic_fallback`), compute `raw × gate`, `is_risky`, `liquidity_health` | always | 0 |
 
 Typical total **~176 CU**, up to **~262 CU** when the OHLCV window is large (Solana adds the
 5 CU snapshot). `hybrid` adds **no** extra API calls — it only changes the scoring logic.
+`momentum_only` skips steps 6 / 7 / 8 and saves 81 CU (typical **~95 CU**).
 
 ## Step by Step
 
@@ -58,12 +63,15 @@ cheap call, so the gate compares a live snapshot instead of a stale bar close.
 `token_overview` adds price / market cap / liquidity / holder count / 24h volume; the holder
 chart and holder profile give the holder-growth and cohort-health signals; `token_security`
 gives the honeypot flag, mint / freeze authority and tax used by the Security gate. All
-feed the composite and the three gates.
+feed the composite and the three gates. Under `momentum_only` steps 6 / 7 / 8 are skipped
+entirely (no holder / security data is fetched), so only the overview plus OHLCV and
+liquidity feed the price / volume / liquidity composite.
 
 ### Step 9 — Compose
-Each interval gets a `raw` score; the three gates combine into one multiplier; the final
+Each interval gets a `raw` score; the gates combine into one multiplier; the final
 score is `raw × gate`. Intervals where `hybrid` cannot apply the native formula are marked
 `classic_fallback`. `is_risky` is `true` when the combined gate drops below `0.5`.
+In `momentum_only` the gate is liquidity only.
 
 ## Scoring (high level)
 
@@ -91,6 +99,17 @@ final = raw × gate
 - `is_risky` when the combined gate < 0.5.
 - A gate whose input the chain does not report (for example holder breadth) is left out and
   the remaining gate weights are renormalised, so missing data is not scored as a zero.
+
+**Momentum-only** drops the holder and security components and keeps price / volume /
+liquidity, renormalised:
+
+```
+raw   = Σ kept component_score × renormalised_weight   # volume / swaps / price / liquidity
+gate  = liquidity_gate                                  # security + holder dropped
+final = raw × gate
+```
+
+The holder / security endpoints are not called, and the junk gate reduces to liquidity only.
 
 **Hybrid** keeps the classic score and blends a native "attention" score on the supported
 intervals:
@@ -139,6 +158,8 @@ Read it in this order:
 | Token security (`/defi/token_security`) | 30 |
 
 Typical **~176**, up to **~262** at the largest OHLCV window. Replay from cache = 0 CU.
+`momentum_only` skips holder chart + holder profile + security (81 CU), so its typical total
+is **~95 CU**.
 
 ## Errors
 
