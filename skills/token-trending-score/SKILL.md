@@ -38,14 +38,15 @@ Models:
 
 | Step | Endpoint | What it checks / produces | Mode |
 |---|---|---|---|
-| 1 | `GET /defi/v3/ohlcv` | 1m candles (default 5000) for the price / volume / pace series (25–100 CU) | always |
-| 2 | `GET /defi/v3/liquidity/ohlc/token` | liquidity drawdown series → stability + `liquidity_health` (20 CU) | always |
-| 3 | `POST /defi/v3/liquidity/latest/token` | live **total + exit** liquidity snapshot (5 CU) | Solana |
-| 4 | `GET /defi/token_overview` | price, market cap, liquidity, holder count, 24h volume (21 CU) | always |
-| 5 | `GET /token/v1/holder/chart` | holder growth series — the **Holder Dynamics** component (30 CU) | always |
-| 6 | `GET /token/v1/holder-profile` | cohort tags / holder health for **Holder Dynamics** (21 CU) | always |
-| 7 | `GET /defi/token_security` | honeypot flag, mint / freeze, tax — the **Security** component + gate (30 CU) | always |
-| 8 | — | classify interval status (`native` / `classic_fallback`), compute the composite `raw × gate`, `is_risky`, `liquidity_health` | always |
+| 1 | `GET /defi/token_creation_info` | token age / creation context (35 CU) | always |
+| 2 | `GET /defi/v3/ohlcv` | 1m candles (default 5000) for the price / volume / pace series (25–100 CU) | always |
+| 3 | `GET /defi/v3/liquidity/ohlc/token` | liquidity drawdown series → stability + `liquidity_health` (20 CU) | always |
+| 4 | `POST /defi/v3/liquidity/latest/token` | live **total + exit** liquidity snapshot (5 CU) | Solana |
+| 5 | `GET /defi/token_overview` | price, market cap, liquidity, holder count, 24h volume (21 CU) | always |
+| 6 | `GET /token/v1/holder/chart` | holder growth series — the **Holder Dynamics** component (30 CU) | always |
+| 7 | `GET /token/v1/holder-profile` | cohort tags / holder health for **Holder Dynamics** (21 CU) | always |
+| 8 | `GET /defi/token_security` | honeypot flag, mint / freeze, tax — the **Security** component + gate (30 CU) | always |
+| 9 | — | classify interval status (`native` / `classic_fallback`), compute the composite `raw × gate`, `is_risky`, `liquidity_health` | always |
 
 Typical total **~176 CU**, up to **~262 CU** when the OHLCV window is large (Solana adds the 5 CU snapshot).
 
@@ -83,6 +84,7 @@ birdeye-cli token-trending-score --chain sol --address <MINT> --candles 2000 --n
 
 | Block | CU |
 |---|---|
+| Creation info (`/defi/token_creation_info`) | 35 |
 | OHLCV 1m (`/defi/v3/ohlcv`) | 25–100 (by candle count) |
 | Liquidity OHLC (`/defi/v3/liquidity/ohlc/token`) | 20 |
 | Liquidity latest (`/defi/v3/liquidity/latest/token`) | 5 (Solana) |

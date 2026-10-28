@@ -144,11 +144,13 @@ reading notes live in [`skills/<name>/SKILL.md`](skills/).
 | `wallet-score` | PnL summary + per-token rug% + first-funded + portfolio | — | 30-110 |
 | `wallet-style` | PnL summary + PnL details + `tx_list` | — | 60-90 |
 | `kline-pattern` | one OHLCV call | — | 25-100 |
-| `token-trending-score` | OHLCV + liquidity OHLC (+ live snapshot) + overview + holder chart/profile + security | `classic` / `hybrid` | ~176 |
+| `token-trending-score` | creation info + OHLCV + liquidity OHLC (+ live snapshot) + overview + holder chart/profile + security | `classic` / `hybrid` | ~176 |
 | `junk-predict` | token overview (+ holder distribution) per token | 3 models | 21-51 / token |
 
 Every skill's `SKILL.md` carries its own credential guard, argument table, step flow
-(which API, what it checks, in which mode), CU cost and error map.
+(which API, what it checks, in which mode), CU cost and error map. The same flows in prose —
+high-level concept, step by step, weights and how to read the output — live in
+[`docs/workflow/`](docs/workflow/).
 
 ## 6. Exit codes
 

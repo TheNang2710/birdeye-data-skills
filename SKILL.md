@@ -126,7 +126,9 @@ footer — `⚡CU: <total> (<breakdown>)`.
 
 Each skill is self-contained — its `SKILL.md` carries the credential guard, full argument
 table, the step flow (which Birdeye endpoint, what it checks, in which mode), CU cost and
-error map, and is the source of truth for that skill:
+error map, and is the source of truth for that skill. A prose walkthrough of each flow
+(high-level concept, step by step, weights, how to read the output) lives in
+[`docs/workflow/`](docs/workflow/README.md).
 
 - [`skills/token-duediligence/SKILL.md`](skills/token-duediligence/SKILL.md) — token due-diligence score
 - [`skills/trending-list/SKILL.md`](skills/trending-list/SKILL.md) — hot-token list passthrough
