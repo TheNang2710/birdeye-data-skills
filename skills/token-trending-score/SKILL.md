@@ -1,7 +1,7 @@
 ---
 name: token-trending-score
-description: "Compute a 0..100 momentum / trending score for a token per interval from OHLCV + liquidity + holders + security. Supports `classic` (original 6-component momentum model), `hybrid` (classic blended with wallets/volume/pace interval formula) and `momentum_only` (price / volume / liquidity only — holder + security dropped and not fetched). Use when the user asks how hot or how trending a token is, momentum score, whether it is pumping, trend strength, or multi-interval momentum for one token."
-argument-hint: "birdeye-cli token-trending-score --chain <sol|bsc|base|eth> --address <MINT> [--model <classic|hybrid|momentum_only>] [--candles <n>] [--nocache] [--format <ui|json|telegram|plain|raw-json>]"
+description: "Compute a 0..100 momentum / trending score for a token per interval from OHLCV + liquidity + holders + security. Four models — `momentum_only` (default: price / volume / liquidity only; holder + security dropped and not fetched), `classic` (original 6-component momentum model), `hybrid` (classic blended with the wallets / volume / pace interval term) and `human` (the bare wallets / volume / pace / price formula on its own — overview only, no blend and no gates). Use when the user asks how hot or how trending a token is, momentum score, whether it is pumping, trend strength, or multi-interval momentum for one token."
+argument-hint: "birdeye-cli token-trending-score --chain <sol|bsc|base|eth> --address <MINT> [--model <momentum_only|classic|hybrid|human>] [--candles <n>] [--nocache] [--format <ui|json|telegram|plain|raw-json>]"
 metadata:
   cliHelp: "birdeye-cli token-trending-score --help"
   cuTypical: 176
@@ -16,9 +16,10 @@ holder profile (21 CU) + security (30 CU) → typical **~176 CU**.
 
 Models:
 
+- `momentum_only` (default) — price / volume / liquidity only; holder + security components and gates are dropped and their endpoints are not called
 - `classic` — original 6-component momentum score
 - `hybrid` — `classic` plus wallets / volume / pace interval attention on 1h / 4h / 24h
-- `momentum_only` — price / volume / liquidity only; holder + security components and gates are dropped and their endpoints are not called
+- `human` — the bare wallets / volume / pace / price formula on its own; overview only, no blend and no gates
 
 ## Core Capabilities
 
@@ -29,8 +30,9 @@ Models:
 - Liquidity depth is read from the **live snapshot** (`token_overview` + `POST /defi/v3/liquidity/latest/token`), not a stale OHLC close; the OHLC series only supplies trend/stability, and a fallback is labelled with its `ohlc_age_seconds`
 - A confirmed honeypot is the only hard stop — it collapses the gate to near zero
 - Reports a score-independent `liquidity_health` badge — `DYING` (liquidity down 80–99%) or a red `DEAD` (≥99% down, or either pool below USD 10) — even when the trending score is still high
-- Three models: `classic` (momentum baseline, works on any token), `hybrid` (adds the wallets / volume / pace native formula on 1h / 4h / 24h) and `momentum_only` (price / volume / liquidity only)
+- Four models: `momentum_only` (default: price / volume / liquidity only), `classic` (momentum baseline, works on any token), `hybrid` (adds the wallets / volume / pace attention term on 1h / 4h / 24h) and `human` (the bare wallets / volume / pace / price formula, no blend and no gate)
 - `momentum_only` drops the holder + security components **and** their gates, renormalises the remaining weights (volume / swaps / price / liquidity) and never calls the holder / security endpoints; the junk gate reduces to liquidity only
+- `human` reads the overview only, so no OHLCV, liquidity, holder or security endpoint is called and no gate is applied; an interval its inputs cannot feed is dropped from the result rather than reported as a fabricated value
 - Scores 8 intervals — 5m · 15m · 30m · 1h · 4h · 6h · 12h · 24h — so short pumps and sustained trends are separated
 - Raises `⚠ pipeline_gap` when required upstream data is missing instead of silently degrading
 - Runs on `sol` · `bsc` · `base` · `eth`
@@ -69,8 +71,10 @@ Fallback CLI: `python3 birdeye_cli.py token-trending-score ...` (see the repo `R
 
 ```bash
 birdeye-cli token-trending-score --chain sol --address <MINT> --format plain
-birdeye-cli token-trending-score --chain sol --address <MINT> --model hybrid --format json
 birdeye-cli token-trending-score --chain sol --address <MINT> --model momentum_only --format plain
+birdeye-cli token-trending-score --chain sol --address <MINT> --model classic --format json
+birdeye-cli token-trending-score --chain sol --address <MINT> --model hybrid --format json
+birdeye-cli token-trending-score --chain sol --address <MINT> --model human --format plain
 birdeye-cli token-trending-score --chain sol --address <MINT> --candles 2000 --nocache --format json
 ```
 
@@ -80,7 +84,7 @@ birdeye-cli token-trending-score --chain sol --address <MINT> --candles 2000 --n
 |---|---|---|
 | `--chain` | `sol` | `sol` · `bsc` · `base` · `eth` |
 | `--address` | — | **required**, token contract |
-| `--model` | `classic` | `classic` · `hybrid` · `momentum_only` |
+| `--model` | `momentum_only` | `momentum_only` · `classic` · `hybrid` · `human` |
 | `--candles` | `5000` | 1m candles (5000 = 100 CU, ~83h) |
 | `--nocache` | off | bypass the 24h CSV cache and refetch |
 | `--format` | `plain` on the CLI | `ui` · `json` · `telegram` · `plain` · `raw-json` |
@@ -100,7 +104,8 @@ birdeye-cli token-trending-score --chain sol --address <MINT> --candles 2000 --n
 | **Typical total** | **~176** |
 
 ~262 CU at the largest OHLCV window. Replay from cache (24h) = 0 CU.
-`--model momentum_only` skips holder chart + holder profile + security, saving 30 + 21 + 30 = **81 CU** (typical total drops to **~95 CU**).
+`--model momentum_only` (default) skips holder chart + holder profile + security, saving 30 + 21 + 30 = **81 CU** (typical total drops to **~95 CU**).
+`--model human` reads the overview only, so only the 21 CU overview (plus a snapshot where relevant) is charged — a typical total of **~21 CU**.
 
 ## Output
 
@@ -121,6 +126,7 @@ Read it in this order:
 
 `hybrid` only uses the native formula on `1h` / `4h` / `24h`; other intervals are marked `classic_fallback`.
 Under `momentum_only` the per-interval rows show only `Vol` / `Swap` / `Price` / `Liq`, the gates block has liquidity only, and the holder / security endpoints are never called.
+Under `human` the per-interval rows show `Wallets` / `VolUSD` / `PxChg%`, there is no gate block, and any interval the overview cannot feed is simply absent from the table (so fewer intervals than 8 can be reported).
 
 ## Errors
 

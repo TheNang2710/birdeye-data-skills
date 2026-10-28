@@ -84,7 +84,7 @@ birdeye-cli <skill> <required flags> [thresholds / mode switches] --format <fmt>
 | `wallet-score` | Wallet alpha + copy-tradeability | `--duration`, `--pnl-method` | 30-110 |
 | `wallet-style` | Scalper or swing? | `--duration 7d\|30d` | 60-90 |
 | `kline-pattern` | Candlestick / chart pattern | `--resolution`, `--window` | 25-100 |
-| `token-trending-score` | How hot / trending is a token? | `--model classic\|hybrid\|momentum_only` | ~176 (~95 in momentum_only) |
+| `token-trending-score` | How hot / trending is a token? | `--model momentum_only\|classic\|hybrid\|human` | ~176 (~95 in momentum_only) |
 | `junk-predict` | Scam / dust / junk filter (batch) | `--model unsupervised\|function\|supervised` | 21-51 / token |
 
 ---

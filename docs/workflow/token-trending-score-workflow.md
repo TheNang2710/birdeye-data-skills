@@ -1,9 +1,10 @@
 # `token-trending-score` — Public Workflow
 
 A **0–100 momentum / trending score per interval** for one token, so short pumps and
-sustained trends are separated. Three models: `classic` (momentum baseline), `hybrid`
-(adds the wallets / volume / pace interval formula) and `momentum_only` (price / volume /
-liquidity only — holder + security dropped and not fetched).
+sustained trends are separated. Four models: `momentum_only` (default — price / volume /
+liquidity only), `classic` (momentum baseline), `hybrid` (adds the wallets / volume / pace
+interval term) and `human` (the bare wallets / volume / pace / price formula on its own —
+overview only, no blend and no gates).
 
 ## High-Level Concept
 
@@ -14,12 +15,16 @@ junk is filtered while momentum still decides the ranking. A **confirmed honeypo
 only hard stop. A score-independent `liquidity_health` label (`DYING` / `DEAD`) is reported
 even when the trending score is still high.
 
+- `momentum_only` (default) keeps only price / volume / liquidity: the holder and security
+  components **and** their gates are dropped, the remaining weights are renormalised, and the
+  holder / security endpoints are never called — the junk gate reduces to liquidity only.
 - `classic` works on any token (momentum baseline).
 - `hybrid` blends in the wallets / volume / pace "attention" formula on `1h` / `4h` / `24h`;
   other intervals fall back to `classic` and are marked `classic_fallback`.
-- `momentum_only` keeps only price / volume / liquidity: the holder and security components
-  **and** their gates are dropped, the remaining weights are renormalised, and the holder /
-  security endpoints are never called — the junk gate reduces to liquidity only.
+- `human` is that attention formula on its own — no classic blend and no gate. It reads the
+  overview only, so no OHLCV, liquidity, holder or security endpoint is called, and an
+  interval its inputs cannot feed is dropped from the result rather than reported as a
+  fabricated value (so a run can legitimately surface fewer intervals than eight).
 - Depth is read from a **live snapshot** (`token_overview` + `POST /defi/v3/liquidity/latest/token`),
   never a stale OHLC close; an OHLC fallback is labelled with its `ohlc_age_seconds`.
 
@@ -27,19 +32,20 @@ even when the trending score is still high.
 
 | Step | Endpoint | What it checks / produces | Mode | CU |
 |---|---|---|---:|---:|
-| 1 | `GET /defi/token_creation_info` | token age / creation context | always | 35 |
-| 2 | `GET /defi/v3/ohlcv` | 1m candles (default 5000) for the price / volume / pace series | always | 25–100 |
-| 3 | `GET /defi/v3/liquidity/ohlc/token` | liquidity drawdown series → stability + `liquidity_health` | always | 20 |
-| 4 | `POST /defi/v3/liquidity/latest/token` | live **total + exit** liquidity snapshot | Solana | 5 |
-| 5 | `GET /defi/token_overview` | price, market cap, liquidity, holder count, 24h volume | always | 21 |
+| 1 | `GET /defi/token_creation_info` | token age / creation context | every model except `human` | 35 |
+| 2 | `GET /defi/v3/ohlcv` | 1m candles (default 5000) for the price / volume / pace series | every model except `human` | 25–100 |
+| 3 | `GET /defi/v3/liquidity/ohlc/token` | liquidity drawdown series → stability + `liquidity_health` | every model except `human` | 20 |
+| 4 | `POST /defi/v3/liquidity/latest/token` | live **total + exit** liquidity snapshot | `classic` / `hybrid` / `momentum_only` (Solana) | 5 |
+| 5 | `GET /defi/token_overview` | price, market cap, liquidity, holder count, 24h volume — also the only source for `human` | always | 21 |
 | 6 | `GET /token/v1/holder/chart` | holder growth series — the Holder Dynamics component | `classic` / `hybrid` | 30 |
 | 7 | `GET /token/v1/holder-profile` | cohort tags / holder health for Holder Dynamics | `classic` / `hybrid` | 21 |
 | 8 | `GET /defi/token_security` | honeypot flag, mint / freeze, tax — the Security component + gate | `classic` / `hybrid` | 30 |
-| 9 | — | classify intervals (`native` / `classic_fallback`), compute `raw × gate`, `is_risky`, `liquidity_health` | always | 0 |
+| 9 | — | classify intervals (`native` / `classic_fallback`), compute `raw × gate`, `is_risky`, `liquidity_health` | `classic` / `hybrid` / `momentum_only` | 0 |
 
 Typical total **~176 CU**, up to **~262 CU** when the OHLCV window is large (Solana adds the
 5 CU snapshot). `hybrid` adds **no** extra API calls — it only changes the scoring logic.
-`momentum_only` skips steps 6 / 7 / 8 and saves 81 CU (typical **~95 CU**).
+`momentum_only` skips steps 6 / 7 / 8 and saves 81 CU (typical **~95 CU**). `human` reads only
+step 5 (the 21 CU overview), so its typical total is **~21 CU**.
 
 ## Step by Step
 
@@ -65,13 +71,17 @@ chart and holder profile give the holder-growth and cohort-health signals; `toke
 gives the honeypot flag, mint / freeze authority and tax used by the Security gate. All
 feed the composite and the three gates. Under `momentum_only` steps 6 / 7 / 8 are skipped
 entirely (no holder / security data is fetched), so only the overview plus OHLCV and
-liquidity feed the price / volume / liquidity composite.
+liquidity feed the price / volume / liquidity composite. Under `human`, only
+`token_overview` is called — steps 1–4 and 6–8 are all skipped — so the score comes from the
+overview's wallets / volume / pace / price frames alone.
 
 ### Step 9 — Compose
 Each interval gets a `raw` score; the gates combine into one multiplier; the final
 score is `raw × gate`. Intervals where `hybrid` cannot apply the native formula are marked
 `classic_fallback`. `is_risky` is `true` when the combined gate drops below `0.5`.
-In `momentum_only` the gate is liquidity only.
+In `momentum_only` the gate is liquidity only. `human` has no gate, so its reported score is
+the raw attention score, and any interval whose overview inputs are missing is dropped from
+the result instead of being scored.
 
 ## Scoring (high level)
 
@@ -123,6 +133,18 @@ The native formula rewards wallets, volume and short-vs-long pace, with the pace
 disabled for tokens with too few 24h wallets. Unsupported intervals (`5m`, `15m`, `30m`,
 `6h`, `12h`) fall back to `classic` and are labelled `classic_fallback`.
 
+**Human** is that native "attention" score on its own — no classic blend and no gate:
+
+```
+human_score(T) = native_score(T)      # T ∈ 5m / 1h / 4h / 24h
+human_final    = human_score(T)       # no blend, no gate
+```
+
+It reads the overview only (wallets, volume, pace, price), so no OHLCV, liquidity, holder or
+security endpoint is called. An interval whose overview inputs are missing is dropped from
+the result rather than reported, so a `human` run can surface fewer intervals than the other
+models.
+
 **Liquidity health** (independent of the score): `DEAD` when the pool drawdown is extreme or
 either pool is below USD 10; `DYING` when the drawdown is very high; otherwise `LIQ_OK`.
 
@@ -133,6 +155,9 @@ either pool is below USD 10; `DYING` when the drawdown is very high; otherwise `
   `liquidity_health`, `is_risky`.
 - `telegram`: compact momentum summary.
 - `ui`: per-interval score table + gate block + `liquidity_health` badge.
+
+Under `human` the rows are `Wallets` / `VolUSD` / `PxChg%`, there is no gate block or
+`liquidity_health` badge, and any interval the overview cannot feed is simply absent.
 
 Read it in this order:
 
@@ -158,8 +183,9 @@ Read it in this order:
 | Token security (`/defi/token_security`) | 30 |
 
 Typical **~176**, up to **~262** at the largest OHLCV window. Replay from cache = 0 CU.
-`momentum_only` skips holder chart + holder profile + security (81 CU), so its typical total
-is **~95 CU**.
+`momentum_only` (default) skips holder chart + holder profile + security (81 CU), so its
+typical total is **~95 CU**. `human` calls only the overview, so its typical total is
+**~21 CU**.
 
 ## Errors
 

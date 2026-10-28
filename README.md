@@ -121,7 +121,7 @@ birdeye-cli <skill> --chain <chain> [skill flags] --format <fmt>
 | Wallet alpha + copy-tradeability | `wallet-score` | `birdeye-cli wallet-score --chain sol --wallet <ADDR> --duration 30d --format plain` |
 | Scalper or swing? | `wallet-style` | `birdeye-cli wallet-style --chain sol --wallet <ADDR> --format plain` |
 | Candlestick / chart pattern | `kline-pattern` | `birdeye-cli kline-pattern --chain sol --address <MINT> --resolution 15m --window 7d` |
-| How hot / trending is a token? | `token-trending-score` | `birdeye-cli token-trending-score --chain sol --address <MINT> --model hybrid` |
+| How hot / trending is a token? | `token-trending-score` | `birdeye-cli token-trending-score --chain sol --address <MINT> --model momentum_only` |
 | Scam / dust / junk filter | `junk-predict` | `birdeye-cli junk-predict --chain sol --tokens <MINT1>,<MINT2> --model unsupervised` |
 
 ## 4. Output formats
@@ -156,7 +156,7 @@ reading notes live in [`skills/<name>/SKILL.md`](skills/).
 | `wallet-score` | PnL summary + per-token rug% + first-funded + portfolio | — | 30-110 |
 | `wallet-style` | PnL summary + PnL details + `tx_list` | — | 60-90 |
 | `kline-pattern` | one OHLCV call | — | 25-100 |
-| `token-trending-score` | creation info + OHLCV + liquidity OHLC (+ live snapshot) + overview + holder chart/profile + security | `classic` / `hybrid` / `momentum_only` | ~176 (~95 in momentum_only) |
+| `token-trending-score` | creation info + OHLCV + liquidity OHLC (+ live snapshot) + overview + holder chart/profile + security | `momentum_only` (default) / `classic` / `hybrid` / `human` | ~176 (~95 in momentum_only, ~21 in human) |
 | `junk-predict` | token overview (+ holder distribution) per token | 3 models | 21-51 / token |
 
 Every skill's `SKILL.md` carries its own credential guard, argument table, step flow
