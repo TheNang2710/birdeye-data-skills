@@ -87,8 +87,7 @@ final = raw × gate
 - `security_gate` scales with the security score; a **honeypot collapses it to near zero**
   (the only hard stop).
 - `liquidity_gate` and `holder_gate` ramp smoothly on effective depth (`min(liquidity, exit
-  liquidity)` where reported) and holder count — a heavy-penalty band at very low depth, no
-  hard cliff.
+  liquidity)` where reported) and holder count — no hard cliff.
 - `is_risky` when the combined gate < 0.5.
 
 **Hybrid** keeps the classic score and blends a native "attention" score on the supported

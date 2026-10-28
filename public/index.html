@@ -620,11 +620,11 @@ const FLOW_BY_ID = {
       "classic mode — OHLCV + liquidity + holders + security only: a 6-component momentum score per interval, no overview wallet/volume frames required",
       "hybrid mode — classic plus the interval-native formula on 1h/4h/24h: 1.0·log10(1+wallets) + 0.5·log10(1+volume) + 0.25·pace_now + 0.25·pace_window + 0.25·tanh(price/25), blended 0.55 native / 0.45 classic (wallets from token_overview; price & candles from OHLCV + overview)",
       "Score 8 intervals (5m … 24h) with momentum-heavy weights: Vol 30 · Swap 15 · Price 25 · Hold 10 · Sec 10 · Liq 10",
-      "Apply the weighted junk gate (35% security + 50% liquidity + 15% holder), then read the overall 0-100 score",
+      "Apply the junk gate across security, liquidity and holder breadth, then read the overall 0-100 score",
     ],caps:[
       "Momentum decides trending — volume and price carry 55% of the weight; security, liquidity and holder breadth are 10% each",
       "Security, liquidity and holder breadth also act as continuous gates, not hard cliffs: the three combine into one weighted multiplier (35% / 50% / 15%) so junk is filtered while momentum still ranks",
-      "Security gate = security score / 100; liquidity gate ramps 0 (<USD 1k) → 50% (4k) → 80% (10k) → 100% (50k); holder gate ramps 0 (≤100) → 90% (1k) → 100% (2k)",
+      "Each gate scales smoothly as its input improves — a weak read lowers the multiplier rather than tripping a hard cutoff",
       "Liquidity gate uses effective depth — min(liquidity, exit liquidity) where reported; exit liquidity is used on Solana",
       "A confirmed honeypot is the only hard stop (near-zero gate)",
       "Two models: classic (OHLCV-only, works on any token) and hybrid (adds the wallets / volume / pace native formula on 1h/4h/24h)",
