@@ -14,11 +14,12 @@ no Node, no build step.
 - A **Key bar** — paste your Birdeye API key once, stored in the browser only
 - A collapsible **History** panel with **0-CU replay** of previous runs
 - A ready-to-copy `cURL` for every run, so a UI run becomes a script
-- The freezer v1 console is still served at `/v1`
+- The frozen v1 console is still served at `/v1` — **local only**, it is not uploaded to the
+  hosted build
 
 | Layer | File | Role |
 |---|---|---|
-| Frontend | [`public/index.html`](../public/index.html) | the console (v2) · [`public/v1.html`](../public/v1.html) is the frozen v1 |
+| Frontend | [`public/index.html`](../public/index.html) | the console (v2) · [`public/v1.html`](../public/v1.html) is the frozen v1 (local only) |
 | Local proxy | [`server.py`](../server.py) | serves the frontend + forwards `/api/run` to the engine |
 | Control script | [`server.sh`](../server.sh) | start / stop / restart / fg / watch / status (macOS + Linux) |
 | Engine | private service | the closed scoring engine (formulas + API calls) |
@@ -76,7 +77,7 @@ Go to **<http://127.0.0.1:8765/>** in your browser.
 | Route | Serves |
 |---|---|
 | `/` or `/v2` | the console (v2) |
-| `/v1` | the frozen v1 console |
+| `/v1` | the frozen v1 console (local only — never on the hosted build) |
 | `/health` | liveness probe (`{ok, root, engine}`) |
 | `/api/meta` | runtime capabilities |
 | `/api/key-info` | masked key state |
@@ -136,7 +137,8 @@ CLI flags: `--host`, `--port`, `--engine`, `--reload`.
 
 ## Hosted build & self-hosting the engine
 
-- Hosted console: <https://birdeye-data-skills.vercel.app> (frozen v1 at `/v1`).
+- Hosted console: <https://birdeye-data-skills.vercel.app> (console v2 only — the frozen v1 is
+  local only and is not part of the hosted build).
 - The console talks to the same engine as the CLI. To use your **own** engine, point it with
   `--engine <URL>` or `ENGINE_URL=<URL>`; the proxy only needs the engine's `/api/run`
   contract.

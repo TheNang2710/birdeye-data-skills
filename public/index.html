@@ -257,7 +257,7 @@
   </div>
   <div class="headRight">
     <a class="verpill on" href="/" title="Console v2 — semi-open token DD">v2</a>
-    <a class="verpill" href="/v1" title="Console v1 — frozen baseline">v1</a>
+    <a class="verpill" id="v1Pill" href="/v1" title="Console v1 — frozen baseline (local only)">v1</a>
     <span class="pill" id="modePill">…</span>
     <button class="histToggle" id="histToggle" title="Show history panel">&lt;&lt;&lt; History<span class="n" id="histToggleCnt">0</span></button>
   </div>
@@ -290,6 +290,12 @@
 </div>
 <script>
 "use strict";
+// Console v1 is a frozen local-only baseline: it is served by the local console
+// (server.py) but is not uploaded to the hosted build, so hide its link off-local.
+if(!["localhost", "127.0.0.1", "::1", "[::1]"].includes(location.hostname)){
+  const _v1 = document.getElementById("v1Pill");
+  if(_v1) _v1.remove();
+}
 const CHAINS = ["sol","bsc","base","eth","arc","robinhood","multi_chain"];
 const TRENDING_LIST_CHAINS = ["solana","bsc","base","ethereum","arbitrum","robinhood","multi_chain"];
 const PRICE_SURGE_CHAINS = ["solana","bsc","base","ethereum","arbitrum","robinhood"];

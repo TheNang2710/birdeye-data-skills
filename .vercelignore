@@ -22,3 +22,6 @@ SKILL.md
 skills/
 birdeye_cli.py
 pyproject.toml
+
+# Console v1 is a frozen local-only baseline — never uploaded to Vercel.
+public/v1.html

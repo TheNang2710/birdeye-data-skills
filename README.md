@@ -194,7 +194,8 @@ Open <http://127.0.0.1:8765/>, then paste your Birdeye API key into the Key bar 
 
 The console gives every skill a point-and-click form, the same five output formats, a
 collapsible **History** panel with 0-CU replay, and a copy-ready `cURL` per run. The frozen v1
-console is at `/v1`; the hosted build is at <https://birdeye-data-skills.vercel.app>.
+console is **local only** (`/v1` — it is never uploaded to the hosted build); the hosted build
+is at <https://birdeye-data-skills.vercel.app>.
 
 Controls: `./server.sh {start|stop|restart|fg|watch|status}`. Full guide —
 [`docs/local-console.md`](docs/local-console.md).
