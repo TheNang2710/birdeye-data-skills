@@ -18,3 +18,7 @@ docs-local/
 server.py
 server.sh
 README.md
+SKILL.md
+skills/
+birdeye_cli.py
+pyproject.toml

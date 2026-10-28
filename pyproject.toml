@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "birdeye-skills-cli"
+version = "1.0.0"
+description = "Thin CLI client for the hosted Birdeye Skills scoring engine."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { text = "MIT" }
+authors = [{ name = "nguyenthenang", email = "nguyenthenang89@gmail.com" }]
+keywords = ["birdeye", "crypto", "solana", "defi", "screener", "cli"]
+dependencies = []
+
+[project.urls]
+Repository = "https://github.com/TheNang2710/birdeye-data-skills"
+
+[project.scripts]
+birdeye-cli = "birdeye_cli:cli"
+
+[tool.setuptools]
+py-modules = ["birdeye_cli"]

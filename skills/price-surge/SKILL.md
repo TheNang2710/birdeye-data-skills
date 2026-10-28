@@ -1,7 +1,7 @@
 ---
 name: price-surge
 description: "Scan a chain for price-surge signals inside a market-cap band and auto-filter high-risk tokens (rug-pull, wash trading, honeypots). Use when the user wants surging / pumping tokens right now, a momentum screener within a market-cap range, or a risk-screened surge list. Starts from Birdeye's token list v3 and, in advanced mode, hydrates per-token top-trader and holder-health data, with an optional security check."
-argument-hint: "price-surge --chain <solana|bsc|base|ethereum|arbitrum|robinhood> [--interval <1m|5m|30m|1h|2h|4h|8h|24h|7d|30d>] [--mode <standard|advanced>] [--min-price-change <pct>] [--min-market-cap <usd>] [--max-market-cap <usd>] [--min-liquidity <usd>] [--min-volume <usd>] [--sort-by <price_change|volume|market_cap|liquidity|trade_count|holder>] [--sort-type <desc|asc>] [--limit <1..100>] [--offset <n>] [--top <n>] [--with-security] [--format <ui|json|telegram|plain>]"
+argument-hint: "birdeye-cli price-surge --chain <solana|bsc|base|ethereum|arbitrum|robinhood> [--interval <1m|5m|30m|1h|2h|4h|8h|24h|7d|30d>] [--mode <standard|advanced>] [--min-price-change <pct>] [--min-market-cap <usd>] [--max-market-cap <usd>] [--min-liquidity <usd>] [--min-volume <usd>] [--sort-by <price_change|volume|market_cap|liquidity|trade_count|holder>] [--sort-type <desc|asc>] [--limit <1..100>] [--offset <n>] [--top <n>] [--with-security] [--format <plain|json|telegram|ui>]"
 metadata:
   cliHelp: "birdeye-cli price-surge --help"
   cuTypical: 50
@@ -37,6 +37,19 @@ chain, the surge window, the market-cap band and the risk caps.
 - Runs on `solana` · `bsc` · `base` · `ethereum` · `arbitrum` · `robinhood`
 - `ui` renders a compact **list-row table** with a stat strip, one collapsed *health* cell and one collapsed *security* cell; `plain` and `telegram` render compact lists
 
+## Flow
+
+| Step | Endpoint | What it checks / produces | Mode |
+|---|---|---|---|
+| 1 | `GET /defi/v3/token/list` | the surge feed: price change, market cap, liquidity, volume, trades, holders for the band (50 CU) | both |
+| 2 | local | structural screen on the list rows — stale MC, zero/thin liquidity, no sell side, wash-trade churn | both |
+| 3 | `GET /defi/v2/tokens/top_traders` | KOL buyer count + profitable-wallet ratio per hydrated row (30/row) | advanced |
+| 4 | `GET /token/v1/holder-profile` | cohort tag distribution (dev · bundler · sniper · insider) per hydrated row — **Solana only** (30/row) | advanced |
+| 5 | `GET /defi/token_security` | confirmed honeypot, tax, rug proxies, dev-hold / top-10 concentration per hydrated row (30/row) | advanced + `--with-security` |
+| 6 | local | render kept rows + an *Auto-filtered* table carrying each `exclude_reason` | both |
+
+`--top` bounds how many rows Step 3–5 hydrate, so advanced spend is predictable.
+
 ## Credential Pre-flight (mandatory)
 
 **BEFORE RUNNING ANY COMMAND: run `birdeye-cli config --check`.**
@@ -44,7 +57,7 @@ chain, the surge window, the market-cap band and the risk caps.
 - exit `0` → proceed.
 - exit `1` → `birdeye-cli config --apply <KEY>` (writes `~/.config/birdeye/.env`, chmod 600).
 
-Fallback CLI: `python3 birdeye_cli.py price-surge ...`.
+Fallback CLI: `python3 birdeye_cli.py price-surge ...` (see the repo `README.md` for install).
 
 ## Usage
 
@@ -61,6 +74,8 @@ birdeye-cli price-surge --chain solana --interval 1h --mode advanced \
 # Keep everything (no exclusion) and dump the upstream payload
 birdeye-cli price-surge --chain solana --interval 1h --no-auto-filter --limit 50 --format json
 ```
+
+## Arguments
 
 | Flag | Default | Notes |
 |---|---|---|
@@ -87,7 +102,7 @@ birdeye-cli price-surge --chain solana --interval 1h --no-auto-filter --limit 50
 | `--max-dev-hold-pct` | — | advanced: exclude when dev holds more than this % of supply |
 | `--max-top10-pct` | — | advanced: exclude when top-10 holders own more than this % of supply |
 | `--min-kol-buyers` | — | advanced: exclude when the tagged KOL buyer count is below this |
-| `--format` | `ui` | `ui` · `json` · `telegram` · `plain` |
+| `--format` | `plain` on the CLI | `plain` · `json` · `telegram` · `ui` |
 
 ## Cost
 
@@ -103,14 +118,19 @@ holder-distribution call is needed.
 
 ## Output
 
-- `ui`: compact list-row table with a stat strip, a collapsed *health* cell and a collapsed *security* cell + an *Auto-filtered* table
 - `plain`: compact terminal table
-- `telegram`: per-token guard summary
 - `json`: upstream response payload
+- `telegram`: per-token guard summary
+- `ui`: compact list-row table with a stat strip, a collapsed *health* cell and a collapsed *security* cell + an *Auto-filtered* table
 
-Every row keeps `risk_flags` and (for excluded rows) `exclude_reason`, so the screen stays auditable.
+Reading it:
 
-## Error handling
+- **Kept rows** carry `risk_flags`; **excluded rows** stay visible in the *Auto-filtered* table
+  with an `exclude_reason` — the screen is fully auditable.
+- `--format json` exposes the raw payload including every `exclude_reason`.
+- The final line is the cost footer — `⚡CU: <total> (<breakdown>)`.
+
+## Errors
 
 `[E401]` bad key → `config --apply <KEY>` · `[E403]` tier/route blocked ·
 `[E429]` rate-limited, back off · `[E500]` Birdeye upstream, retry.

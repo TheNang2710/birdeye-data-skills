@@ -1,7 +1,7 @@
 ---
 name: trending-list
-description: "Return Birdeye's hot-token leaderboard from `/defi/token_trending` with no local scoring or re-ranking. Use when the user wants the current trending token list, hot tokens by chain, Birdeye-ranked movers, or a lightweight discover/list view before deeper token analysis."
-argument-hint: "trending-list --chain <solana|bsc|base|ethereum|arbitrum|robinhood|multi_chain> [--mode <selective|classic>] [--interval <5m|30m|1h|4h|24h>] [--sort-by <rank|volumeUSD|liquidity>] [--sort-type <desc|asc>] [--limit <1..50>] [--offset <n>] [--platform <text>] [--format <ui|json|telegram|plain|raw-json>]"
+description: "Return Birdeye's hot-token leaderboard from /defi/token_trending with no local scoring or re-ranking. Use when the user wants the current trending token list, hot tokens by chain, Birdeye-ranked movers, or a lightweight discover/list view before deeper token analysis."
+argument-hint: "birdeye-cli trending-list --chain <solana|bsc|base|ethereum|arbitrum|robinhood|multi_chain> [--mode <selective|classic>] [--interval <5m|30m|1h|4h|24h>] [--sort-by <rank|volumeUSD|liquidity>] [--sort-type <desc|asc>] [--limit <1..50>] [--offset <n>] [--platform <text>] [--format <plain|json|telegram|raw-json|ui>]"
 metadata:
   cliHelp: "birdeye-cli trending-list --help"
   cuTypical: 30
@@ -25,6 +25,15 @@ simple: **one API call, one list, no local ranking model**.
 - `json` / `raw-json` return the **upstream response payload**, not a wrapped local score object
 - Works well as the first step before `token-dd-score` or `token-trending-score`
 
+## Flow
+
+| Step | Endpoint | What it checks / produces | Mode |
+|---|---|---|---|
+| 1 | `GET /defi/token_trending` | the hot-token list for the chain + interval, sorted Birdeye-side (30 CU) | — |
+| — | local | optional best-effort `--platform` text filter, then render | — |
+
+One call only. No holder, security, liquidity or scoring calls are made.
+
 ## Credential Pre-flight (mandatory)
 
 **BEFORE RUNNING ANY COMMAND: run `birdeye-cli config --check`.**
@@ -32,7 +41,7 @@ simple: **one API call, one list, no local ranking model**.
 - exit `0` → proceed.
 - exit `1` → `birdeye-cli config --apply <KEY>` (writes `~/.config/birdeye/.env`, chmod 600).
 
-Fallback CLI: `python3 birdeye_cli.py trending-list ...`.
+Fallback CLI: `python3 birdeye_cli.py trending-list ...` (see the repo `README.md` for install).
 
 ## Usage
 
@@ -41,6 +50,8 @@ birdeye-cli trending-list --chain solana --mode selective --interval 24h --sort-
 birdeye-cli trending-list --chain solana --mode classic --sort-by volumeUSD --sort-type desc --interval 4h --limit 25 --format ui
 birdeye-cli trending-list --chain solana --mode selective --interval 1h --limit 50 --format json
 ```
+
+## Arguments
 
 | Flag | Default | Notes |
 |---|---|---|
@@ -52,19 +63,21 @@ birdeye-cli trending-list --chain solana --mode selective --interval 1h --limit 
 | `--limit` | `20` | 1..50 rows |
 | `--offset` | `0` | pagination offset |
 | `--platform` | — | best-effort text filter, e.g. `pump.fun` |
-| `--format` | `ui` | `ui` · `json` · `telegram` · `plain` · `raw-json` |
+| `--format` | `plain` on the CLI | `plain` · `json` · `telegram` · `raw-json` · `ui` |
 
 ## Output
 
-- `ui`: screener-style card + compact leaderboard table
-- `plain`: compact terminal table
+- `plain`: compact terminal table — rank, symbol, market cap, price, 24h volume, liquidity, interval %
+- `json` / `raw-json`: the **upstream Birdeye payload** (`data.tokens[]`), not a local score object
 - `telegram`: lightweight hot-list summary
-- `json` / `raw-json`: upstream Birdeye response payload
+- `ui`: screener-style card + compact leaderboard table
+
+The final line is the cost footer — `⚡CU: 30 (token_trending=30)`.
 
 This skill does **not** attach local scores, gates or heuristics. If the user wants a scored view,
 send the chosen token into `token-trending-score` or `token-dd-score`.
 
-## Error handling
+## Errors
 
 `[E401]` bad key → `config --apply <KEY>` · `[E403]` tier/route blocked ·
 `[E429]` rate-limited, back off · `[E500]` Birdeye upstream, retry.
