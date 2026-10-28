@@ -624,7 +624,7 @@ const FLOW_BY_ID = {
     ],caps:[
       "Momentum decides trending — volume and price carry 55% of the weight; security, liquidity and holder breadth are 10% each",
       "Security, liquidity and holder breadth also act as continuous gates, not hard cliffs: the three combine into one weighted multiplier (35% / 50% / 15%) so junk is filtered while momentum still ranks",
-      "Each gate scales smoothly as its input improves — a weak read lowers the multiplier rather than tripping a hard cutoff",
+      "Each gate scales smoothly as its input improves — a weak read lowers the multiplier rather than tripping a hard cutoff; a gate whose input the chain does not report is left out and the rest renormalised",
       "Liquidity gate uses effective depth — min(liquidity, exit liquidity) where reported; exit liquidity is used on Solana",
       "A confirmed honeypot is the only hard stop (near-zero gate)",
       "Two models: classic (OHLCV-only, works on any token) and hybrid (adds the wallets / volume / pace native formula on 1h/4h/24h)",

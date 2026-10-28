@@ -23,6 +23,7 @@ Models:
 
 - Momentum decides trending — volume and price carry 55% of the weight; security and liquidity are 10% each
 - Security and liquidity also act as continuous gates, not hard cliffs: a low value scales the score down smoothly so junk is filtered while momentum still ranks
+- A gate whose input the chain does not report (for example holder breadth on some chains) is left out of the composite and the remaining gate weights are renormalised, so missing data is not counted as a zero
 - Liquidity gate uses effective depth — `min(liquidity, exit liquidity)` where reported; exit liquidity is used on Solana
 - Liquidity depth is read from the **live snapshot** (`token_overview` + `POST /defi/v3/liquidity/latest/token`), not a stale OHLC close; the OHLC series only supplies trend/stability, and a fallback is labelled with its `ohlc_age_seconds`
 - A confirmed honeypot is the only hard stop — it collapses the gate to near zero

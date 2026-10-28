@@ -89,6 +89,8 @@ final = raw × gate
 - `liquidity_gate` and `holder_gate` ramp smoothly on effective depth (`min(liquidity, exit
   liquidity)` where reported) and holder count — no hard cliff.
 - `is_risky` when the combined gate < 0.5.
+- A gate whose input the chain does not report (for example holder breadth) is left out and
+  the remaining gate weights are renormalised, so missing data is not scored as a zero.
 
 **Hybrid** keeps the classic score and blends a native "attention" score on the supported
 intervals:
