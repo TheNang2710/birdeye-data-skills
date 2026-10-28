@@ -163,17 +163,29 @@ high-level concept, step by step, weights and how to read the output — live in
 | 4 | Upstream / engine error (bad key, plan block, rate limit, network) | partial possible on 429 |
 | 5 | Post-response invariant failed — `pipeline_gap` badge | CU (already called) |
 
-## 7. Console (optional)
+## 7. Local console UI (optional)
 
-A web console wraps the same engine. The hosted build is at
-<https://birdeye-data-skills.vercel.app> (frozen v1 at `/v1`). To run it locally:
+The repo also ships a **web console** — a frontend plus a tiny local proxy over the same
+engine. Zero dependencies (stdlib only), no build step. Clone, start one process, open the
+browser.
 
 ```bash
-./server.sh start      # background → http://127.0.0.1:8765/
-./server.sh fg         # foreground
-./server.sh watch      # auto-restart on file change
-./server.sh stop
+git clone https://github.com/TheNang2710/birdeye-data-skills.git
+cd birdeye-data-skills
+
+./server.sh start      # macOS / Linux → http://127.0.0.1:8765/
+python server.py       # Windows (cmd / PowerShell), then open the URL it prints
 ```
+
+Open <http://127.0.0.1:8765/>, then paste your Birdeye API key into the Key bar (browser-only)
+— or save it to this project's `.env`, or export `BIRDEYE_API_KEY` before starting.
+
+The console gives every skill a point-and-click form, the same five output formats, a
+collapsible **History** panel with 0-CU replay, and a copy-ready `cURL` per run. The frozen v1
+console is at `/v1`; the hosted build is at <https://birdeye-data-skills.vercel.app>.
+
+Controls: `./server.sh {start|stop|restart|fg|watch|status}`. Full guide —
+[`docs/local-console.md`](docs/local-console.md).
 
 ## 8. Troubleshooting
 
